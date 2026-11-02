@@ -1,0 +1,469 @@
+<script setup>
+import { ref, computed } from "vue";
+import { Link, useForm } from "@inertiajs/vue3";
+import AppLayout from "../Layouts/AppLayout.vue";
+import Icon from "../Components/Icon.vue";
+import StructuredApplicationForm from "../Components/StructuredApplicationForm.vue";
+import Badge from "../Components/Badge.vue";
+import Errors from "../Components/Errors.vue";
+import { url, date, shortRef } from "../lib/ui";
+import { useApplicationWindow } from "../lib/useApplicationWindow";
+const isOpen = useApplicationWindow();
+const props = defineProps({
+    application: Object,
+    screening: Object,
+    documentRequirements: Array,
+});
+const step = ref(props.application.submitted_at ? 3 : 1);
+const sending = ref(false);
+const form = useForm({
+    statement: props.application.statement || "",
+    consent: !!props.application.consented_at,
+});
+const upload = useForm({ requirement_key: "", file: null });
+const send = useForm({ confirm: false });
+const editable = computed(
+    () =>
+        props.application.status === "BORRADOR" &&
+        isOpen(props.application.recruitment_call),
+);
+const doc = (key) =>
+    props.application.documents.find((d) => d.requirement_key === key);
+const required = computed(() =>
+    (
+        props.documentRequirements || props.application.vacancy.requirements
+    ).filter((r) => r.required),
+);
+const ready = computed(
+    () =>
+        required.value.every((r) => doc(r.key)) &&
+        !!props.application.consented_at &&
+        (!props.screening?.enabled || props.screening.eligible),
+);
+function save() {
+    form.put(url(`/mis-postulaciones/${props.application.id}`), {
+        preserveScroll: true,
+    });
+}
+function selectFile(event, key) {
+    upload.requirement_key = key;
+    upload.file = event.target.files[0];
+    if (upload.file) {
+        upload.post(
+            url(`/mis-postulaciones/${props.application.id}/documentos`),
+            { preserveScroll: true, onSuccess: () => upload.reset() },
+        );
+    }
+    event.target.value = "";
+}
+function submit() {
+    send.post(url(`/mis-postulaciones/${props.application.id}/enviar`), {
+        preserveScroll: true,
+        onSuccess: () => {
+            sending.value = false;
+            step.value = 3;
+        },
+    });
+}
+</script>
+<template>
+    <AppLayout
+        :title="
+            application.submitted_at ? 'Mi expediente' : 'Prepara tu expediente'
+        "
+        :subtitle="application.vacancy.school"
+        ><template #actions><Badge :value="application.status" /></template
+        ><Errors
+            :errors="{ ...form.errors, ...upload.errors, ...send.errors }"
+        />
+        <div v-if="application.recruitment_call.is_demo" class="demo-notice">
+            <Icon name="CircleAlert" :size="18" /> Expediente de demostración,
+            sin validez oficial.
+        </div>
+        <div class="wizard-steps">
+            <button
+                v-for="(title, i) in [
+                    'Información',
+                    'Documentos',
+                    'Revisión y envío',
+                ]"
+                :key="title"
+                :class="{ active: step === i + 1, complete: step > i + 1 }"
+                @click="
+                    (i === 0 || !screening?.enabled || screening.eligible) &&
+                    (step = i + 1)
+                "
+            >
+                <span>{{ i + 1 }}</span
+                >{{ title }}
+            </button>
+        </div>
+        <div class="detail-grid application-grid">
+            <div>
+                <section v-if="step === 1" class="panel">
+                    <div class="panel-heading">
+                        <Icon name="Users" />
+                        <h2>Información de la postulación</h2>
+                    </div>
+                    <div class="info-grid">
+                        <div>
+                            <small>Postulante</small
+                            ><b>{{
+                                application.applicant_snapshot?.name ||
+                                $page.props.auth.user.name
+                            }}</b>
+                        </div>
+                        <div>
+                            <small>DNI</small
+                            ><b>{{
+                                application.applicant_snapshot
+                                    ?.document_number ||
+                                $page.props.auth.user.document_number ||
+                                "Completa tu perfil"
+                            }}</b>
+                        </div>
+                        <div>
+                            <small>Correo</small
+                            ><b>{{
+                                application.applicant_snapshot?.email ||
+                                $page.props.auth.user.email
+                            }}</b>
+                        </div>
+                        <div>
+                            <small>Teléfono</small
+                            ><b>{{
+                                application.applicant_snapshot?.phone ||
+                                $page.props.auth.user.phone ||
+                                "Completa tu perfil"
+                            }}</b>
+                        </div>
+                    </div>
+                    <Link
+                        v-if="editable"
+                        :href="url('/perfil')"
+                        class="text-link"
+                        >Actualizar mis datos
+                        <Icon name="ArrowUpRight" :size="15"
+                    /></Link>
+                    <StructuredApplicationForm
+                        :application="application"
+                        :report="screening"
+                        :editable="editable"
+                        @continue="step = 2"
+                    />
+                    <form
+                        v-if="!screening?.enabled"
+                        @submit.prevent="save"
+                        class="form-section"
+                    >
+                        <label
+                            >Presentación o información complementaria<textarea
+                                v-model="form.statement"
+                                :disabled="!editable"
+                                rows="5"
+                                maxlength="4000"
+                                placeholder="Añade información relevante para la revisión de tu expediente."
+                            ></textarea></label
+                        ><label class="check-label consent"
+                            ><input
+                                type="checkbox"
+                                v-model="form.consent"
+                                :disabled="!editable"
+                            /><span
+                                >Declaro que la información y los documentos son
+                                veraces. Autorizo su tratamiento para la gestión
+                                de esta convocatoria y he revisado la
+                                <Link :href="url('/ayuda#privacidad')"
+                                    >información de privacidad</Link
+                                >.</span
+                            ></label
+                        >
+                        <div class="row between">
+                            <button
+                                v-if="editable"
+                                class="btn btn-primary"
+                                :disabled="form.processing"
+                            >
+                                {{
+                                    form.processing
+                                        ? "Guardando…"
+                                        : "Guardar información"
+                                }}</button
+                            ><button
+                                v-if="!screening?.enabled || screening.eligible"
+                                type="button"
+                                class="btn btn-outline"
+                                @click="step = 2"
+                            >
+                                Continuar <Icon name="ArrowRight" :size="16" />
+                            </button>
+                        </div>
+                    </form>
+                </section>
+                <section v-if="step === 2" class="panel">
+                    <div class="panel-heading">
+                        <Icon name="Upload" />
+                        <h2>Documentos de sustento</h2>
+                    </div>
+                    <p class="muted">
+                        Carga un PDF por requisito. Cada archivo debe pesar como
+                        máximo 5 MB. Puedes reemplazarlo mientras el expediente
+                        sea borrador.
+                    </p>
+                    <div
+                        v-for="r in documentRequirements"
+                        :key="r.key"
+                        class="upload-row"
+                    >
+                        <div class="row">
+                            <span
+                                class="document-state"
+                                :class="{ done: doc(r.key) }"
+                                ><Icon
+                                    :name="doc(r.key) ? 'Check' : 'FileText'"
+                                    :size="19"
+                            /></span>
+                            <div class="grow">
+                                <b>{{ r.label }}</b
+                                ><small>{{
+                                    r.required ? "Obligatorio" : "Opcional"
+                                }}</small
+                                ><a
+                                    v-if="doc(r.key)"
+                                    :href="url('/documentos/' + doc(r.key).id)"
+                                    target="_blank"
+                                    rel="noopener"
+                                    class="file-link"
+                                    >{{ doc(r.key).name }}
+                                    <Icon name="ExternalLink" :size="13"
+                                /></a>
+                            </div>
+                        </div>
+                        <label
+                            v-if="editable"
+                            class="btn btn-outline btn-sm file-upload"
+                            :class="{ disabled: upload.processing }"
+                            ><Icon name="Upload" :size="15" />{{
+                                upload.processing &&
+                                upload.requirement_key === r.key
+                                    ? "Subiendo…"
+                                    : doc(r.key)
+                                      ? "Reemplazar"
+                                      : "Adjuntar PDF"
+                            }}<input
+                                type="file"
+                                accept="application/pdf,.pdf"
+                                :disabled="upload.processing"
+                                @change="selectFile($event, r.key)"
+                        /></label>
+                    </div>
+                    <div class="row between form-section">
+                        <button class="btn btn-outline" @click="step = 1">
+                            Anterior</button
+                        ><button class="btn btn-primary" @click="step = 3">
+                            Revisar expediente
+                            <Icon name="ArrowRight" :size="16" />
+                        </button>
+                    </div>
+                </section>
+                <section v-if="step === 3" class="panel">
+                    <div class="panel-heading">
+                        <Icon
+                            :name="
+                                application.submitted_at
+                                    ? 'CheckCircle2'
+                                    : 'ClipboardCheck'
+                            "
+                        />
+                        <h2>
+                            {{
+                                application.submitted_at
+                                    ? "Expediente recibido"
+                                    : "Revisa antes de enviar"
+                            }}
+                        </h2>
+                    </div>
+                    <template v-if="application.submitted_at"
+                        ><div class="submission-success">
+                            <Icon name="CheckCircle2" :size="46" />
+                            <h3>Tu postulación fue recibida</h3>
+                            <p>
+                                {{ date(application.submitted_at, true) }} ·
+                                Hora de Perú
+                            </p>
+                            <p>
+                                Código completo:
+                                <span class="mono reference">{{
+                                    application.reference
+                                }}</span>
+                            </p>
+                            <a
+                                :href="
+                                    url(
+                                        `/mis-postulaciones/${application.id}/cargo`,
+                                    )
+                                "
+                                target="_blank"
+                                rel="noopener"
+                                class="btn btn-primary"
+                                ><Icon name="Download" :size="17" /> Ver /
+                                imprimir cargo</a
+                            >
+                        </div>
+                        <div class="notice">
+                            El expediente está cerrado para edición. Su
+                            recepción no implica aptitud ni adjudicación de la
+                            plaza.
+                        </div>
+                        <div
+                            v-if="application.review_notes"
+                            class="review-observation"
+                        >
+                            <h3>Observación de la comisión</h3>
+                            <p>{{ application.review_notes }}</p>
+                        </div></template
+                    ><template v-else
+                        ><div class="check-summary">
+                            <div>
+                                <Icon
+                                    :name="
+                                        ready ? 'CheckCircle2' : 'CircleAlert'
+                                    "
+                                /><span
+                                    >{{ application.documents.length }}
+                                    documentos adjuntos ·
+                                    {{
+                                        required.filter((r) => doc(r.key))
+                                            .length
+                                    }}
+                                    de {{ required.length }} requisitos
+                                    obligatorios</span
+                                >
+                            </div>
+                            <div>
+                                <Icon
+                                    :name="
+                                        application.consented_at
+                                            ? 'CheckCircle2'
+                                            : 'CircleAlert'
+                                    "
+                                /><span>{{
+                                    application.consented_at
+                                        ? "Declaración guardada"
+                                        : "Guarda tu declaración en el paso Información"
+                                }}</span>
+                            </div>
+                        </div>
+                        <div class="notice">
+                            Después del envío no podrás reemplazar archivos ni
+                            modificar tu expediente. Verifica que los documentos
+                            sean legibles.
+                        </div>
+                        <button
+                            v-if="editable"
+                            class="btn btn-primary full"
+                            :disabled="!ready"
+                            @click="sending = true"
+                        >
+                            Confirmar envío de mi expediente
+                            <Icon name="ArrowRight" :size="17" />
+                        </button>
+                        <div v-else class="notice notice-error">
+                            La inscripción está cerrada. Ya no es posible enviar
+                            este borrador.
+                        </div></template
+                    >
+                    <h3 class="form-section">Documentos del expediente</h3>
+                    <a
+                        v-for="d in application.documents"
+                        :key="d.id"
+                        :href="url('/documentos/' + d.id)"
+                        target="_blank"
+                        rel="noopener"
+                        class="document-link"
+                        ><Icon name="FileText" /><span
+                            >{{ d.name
+                            }}<small
+                                >{{ (d.size / 1024).toFixed(1) }} KB ·
+                                {{ d.review_status }}</small
+                            ></span
+                        ><Icon name="ExternalLink" :size="16"
+                    /></a>
+                </section>
+            </div>
+            <aside>
+                <section class="panel sticky-card">
+                    <span class="eyebrow">RESUMEN DE LA POSTULACIÓN</span>
+                    <h3>{{ application.vacancy.school }}</h3>
+                    <p>{{ application.vacancy.faculty }}</p>
+                    <div class="summary-list">
+                        <div>
+                            <small>Convocatoria</small
+                            ><b>{{ application.recruitment_call.code }}</b>
+                        </div>
+                        <div>
+                            <small>Registro AIRHSP</small
+                            ><b>{{ application.vacancy.airhsp }}</b>
+                        </div>
+                        <div>
+                            <small>Expediente</small
+                            ><b>{{ shortRef(application.reference) }}</b>
+                        </div>
+                        <div>
+                            <small>Cierre de inscripción</small
+                            ><b>{{
+                                date(
+                                    application.recruitment_call.closes_at,
+                                    true,
+                                )
+                            }}</b>
+                        </div>
+                    </div>
+                    <Link
+                        :href="url('/plazas/' + application.vacancy_id)"
+                        class="text-link"
+                        >Consultar perfil de la plaza
+                        <Icon name="ArrowUpRight" :size="15"
+                    /></Link>
+                </section>
+            </aside>
+        </div>
+        <div
+            v-if="sending"
+            class="modal-backdrop"
+            @click.self="sending = false"
+        >
+            <section class="modal">
+                <Icon name="ClipboardCheck" :size="32" />
+                <h2>¿Enviar tu expediente?</h2>
+                <p>
+                    Se registrarán tus documentos y la hora de recepción. Esta
+                    acción cierra la edición de la postulación.
+                </p>
+                <label class="check-label consent"
+                    ><input type="checkbox" v-model="send.confirm" /><span
+                        >He revisado mis datos y documentos y deseo enviar mi
+                        expediente.</span
+                    ></label
+                >
+                <div class="row end">
+                    <button class="btn btn-outline" @click="sending = false">
+                        Volver a revisar</button
+                    ><button
+                        class="btn btn-primary"
+                        :disabled="
+                            !send.confirm || send.processing || !editable
+                        "
+                        @click="submit"
+                    >
+                        {{
+                            send.processing
+                                ? "Enviando…"
+                                : "Sí, enviar expediente"
+                        }}
+                    </button>
+                </div>
+            </section>
+        </div></AppLayout
+    >
+</template>
