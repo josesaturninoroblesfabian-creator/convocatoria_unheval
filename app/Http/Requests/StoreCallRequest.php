@@ -29,7 +29,9 @@ class StoreCallRequest extends FormRequest
             'schedule.*' => ['array:label,date'],
             'schedule.*.label' => ['required', 'string', 'max:150'],
             'schedule.*.date' => ['required', 'string', 'max:100'],
-            'rubric' => ['required', 'array', 'min:1', 'max:30'],
+            'rubric' => $this->route('recruitmentCall')
+                ? ['present', 'array', 'max:30']
+                : ['required', 'array', 'min:1', 'max:30'],
             'rubric.*' => ['array:key,name,max'],
             'rubric.*.key' => ['required', 'alpha_dash', 'distinct', 'max:30'],
             'rubric.*.name' => ['required', 'string', 'max:150'],

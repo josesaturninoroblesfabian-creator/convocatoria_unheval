@@ -12,6 +12,7 @@ const props = defineProps({
     vacancy: Object,
     contractHours: Object,
     faculties: Array,
+    hasExternalEvaluation: Boolean,
 });
 const firstVacancy = computed(() => !props.call);
 const callPath = computed(() =>
@@ -615,7 +616,11 @@ function removeDocument() {
         <div v-if="vacancy" class="notice row between wrap">
             <div>
                 <strong>Siguiente paso · Requisitos y filtros</strong>
-                <p v-if="form.isDirty || attachment.file">
+                <p v-if="hasExternalEvaluation && form.category !== vacancy.category">
+                    Al guardar el cambio de categoría se reiniciarán los aspectos
+                    externos para cargar el mínimo que corresponde.
+                </p>
+                <p v-else-if="form.isDirty || attachment.file">
                     Guarda los cambios de la ficha o adjunta el PDF seleccionado
                     antes de continuar.
                 </p>
@@ -633,6 +638,13 @@ function removeDocument() {
             >
                 Continuar a requisitos y filtros
                 <Icon name="ArrowRight" :size="17" />
+            </Link>
+            <Link
+                v-if="!form.isDirty && !attachment.file && !attachment.processing"
+                :href="url(vacancyPath + '/aspectos-externos')"
+                class="btn btn-outline"
+            >
+                Aspectos externos
             </Link>
         </div>
 

@@ -9,20 +9,20 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['faculty', 'school', 'airhsp', 'cap', 'category', 'dedication', 'weekly_hours', 'courses', 'requirements', 'screening_rules', 'description', 'professional_profile', 'schedule', 'attached_documents'])]
+#[Fillable(['faculty', 'school', 'airhsp', 'cap', 'category', 'dedication', 'weekly_hours', 'courses', 'requirements', 'screening_rules', 'description', 'professional_profile', 'schedule', 'attached_documents', 'external_evaluation'])]
 class Vacancy extends Model
 {
     use HasFactory;
 
     public const CONTRACT_HOURS = ['DC A1' => 32, 'DC A2' => 16, 'DC A3' => 8, 'DC B1' => 32, 'DC B2' => 16, 'DC B3' => 8];
 
-    protected $hidden = ['attached_documents'];
+    protected $hidden = ['attached_documents', 'external_evaluation'];
 
     protected $appends = ['public_documents', 'contract_hours'];
 
     protected function casts(): array
     {
-        return ['courses' => 'array', 'requirements' => 'array', 'screening_rules' => 'array', 'schedule' => 'array', 'attached_documents' => 'array'];
+        return ['courses' => 'array', 'requirements' => 'array', 'screening_rules' => 'array', 'schedule' => 'array', 'attached_documents' => 'array', 'external_evaluation' => 'array'];
     }
 
     public function getPublicDocumentsAttribute(): array

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from "vue";
-import { Link, useForm } from "@inertiajs/vue3";
+import { Link, router, useForm } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
 import ScreeningEditor from "../Components/ScreeningEditor.vue";
@@ -12,6 +12,7 @@ const props = defineProps({
     call: Object,
     jurors: Array,
     requirementsVacancyId: Number,
+    configuredExternalVacancyIds: Array,
 });
 const next = {
     BORRADOR: { status: "PUBLICADA", label: "Publicar convocatoria" },
@@ -57,10 +58,18 @@ watch(
     },
     { immediate: true },
 );
-function saveScreening() {
+function saveScreening(continueToExternal) {
+    const vacancyId = editingScreening.value.id;
     screeningForm.put(
-        url(`/gestion/plazas/${editingScreening.value.id}/formulario`),
-        { onSuccess: () => (editingScreening.value = null) },
+        url(`/gestion/plazas/${vacancyId}/formulario`),
+        {
+            onSuccess: () => {
+                editingScreening.value = null;
+                if (continueToExternal) {
+                    router.visit(url(`/gestion/plazas/${vacancyId}/aspectos-externos`));
+                }
+            },
+        },
     );
 }
 function move() {
@@ -163,9 +172,12 @@ function saveJury() {
                     ? "La evaluación puede comenzar después del cierre de inscripción."
                     : call.status === "EN_EVALUACION"
                       ? "Finalizar hace públicos los códigos y puntajes de los expedientes evaluados."
-                      : "Revisa toda la configuración antes de avanzar de etapa."
+                      : configuredExternalVacancyIds.length
+                        ? "La publicación queda pendiente hasta completar el flujo de evaluación por plaza."
+                        : "Revisa toda la configuración antes de avanzar de etapa."
             }}</span
             ><button
+                v-if="call.status !== 'BORRADOR' || !configuredExternalVacancyIds.length"
                 class="btn btn-primary btn-sm"
                 @click="confirmation = true"
             >
@@ -239,6 +251,12 @@ function saveJury() {
                         >
                             Configurar requisitos y filtros
                         </button>
+                        <Link
+                            :href="url('/gestion/plazas/' + v.id + '/aspectos-externos')"
+                            class="btn btn-outline btn-sm"
+                        >
+                            {{ configuredExternalVacancyIds.includes(v.id) ? "Editar aspectos externos" : "Configurar aspectos externos" }}
+                        </Link>
                     </template>
                 </div>
                 <div class="jury-box">
@@ -280,16 +298,11 @@ function saveJury() {
                     ><span>{{ s.date }}</span>
                 </div>
             </section>
-            <section class="panel">
+            <section v-if="call.rubric.length" class="panel">
                 <div class="panel-heading">
                     <Icon name="ClipboardCheck" />
-                    <h2>Ficha de evaluación de prueba</h2>
+                    <h2>Rúbrica general de demostración</h2>
                 </div>
-                <p v-if="!call.rubric.length" class="muted">
-                    La evaluación está pendiente. Puedes configurarla al editar
-                    la convocatoria cuando termines los requisitos de las
-                    plazas.
-                </p>
                 <div v-for="r in call.rubric" :key="r.key" class="schedule-row">
                     <span>{{ r.name }}</span
                     ><b>{{ r.max }} pts.</b>
@@ -335,7 +348,10 @@ function saveJury() {
             class="modal-backdrop"
             @click.self="editingScreening = null"
         >
-            <form class="modal wide-modal" @submit.prevent="saveScreening">
+            <form
+                class="modal wide-modal"
+                @submit.prevent="saveScreening($event.submitter?.value === 'external')"
+            >
                 <p class="eyebrow">Configuración de postulación</p>
                 <h2>Requisitos y filtros de {{ editingScreening.school }}</h2>
                 <Errors :errors="screeningForm.errors" /><ScreeningEditor
@@ -390,7 +406,7 @@ function saveJury() {
                 >
                     Añadir documento requerido
                 </button>
-                <div class="row end">
+                <div class="row end wrap">
                     <button
                         type="button"
                         class="btn btn-outline"
@@ -398,10 +414,18 @@ function saveJury() {
                     >
                         Cancelar</button
                     ><button
+                        class="btn btn-outline"
+                        :disabled="screeningForm.processing"
+                    >
+                        Guardar requisitos
+                    </button>
+                    <button
+                        type="submit"
+                        value="external"
                         class="btn btn-primary"
                         :disabled="screeningForm.processing"
                     >
-                        Guardar reglas
+                        Guardar e ir a aspectos externos
                     </button>
                 </div>
             </form>

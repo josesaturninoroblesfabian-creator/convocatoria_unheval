@@ -82,6 +82,10 @@ class ManagementController extends Controller
             'call' => $recruitmentCall,
             'jurors' => User::where('role', 'jurado')->get(['id', 'name', 'email']),
             'requirementsVacancyId' => $vacancy?->id,
+            'configuredExternalVacancyIds' => $recruitmentCall->vacancies
+                ->filter(fn (Vacancy $vacancy): bool => $vacancy->external_evaluation !== null)
+                ->values()
+                ->modelKeys(),
         ]);
     }
 
@@ -101,7 +105,11 @@ class ManagementController extends Controller
         DB::transaction(function () use ($request, $recruitmentCall) {
             $call = RecruitmentCall::lockForUpdate()->findOrFail($recruitmentCall->id);
             abort_unless($call->status === 'BORRADOR', 409);
-            $call->update([...$request->callData($call->evaluation_template), 'rules_approved' => false]);
+            $data = $request->callData($call->evaluation_template);
+            if ($call->modality !== $data['modality'] && $call->vacancies()->exists()) {
+                throw ValidationException::withMessages(['modality' => 'La modalidad queda definida al crear la primera plaza.']);
+            }
+            $call->update([...$data, 'rules_approved' => false]);
             AuditEvent::record('CONVOCATORIA_EDITADA', $call);
         });
 
@@ -160,6 +168,9 @@ class ManagementController extends Controller
                 throw ValidationException::withMessages(['status' => 'La transición de etapa no es válida.']);
             }
             if ($data['status'] === 'PUBLICADA') {
+                if ($call->vacancies()->whereNotNull('external_evaluation')->exists()) {
+                    throw ValidationException::withMessages(['status' => 'Los aspectos externos por plaza están en configuración. La publicación requiere completar su flujo de evaluación.']);
+                }
                 if (! $call->is_demo) {
                     throw ValidationException::withMessages(['status' => 'La publicación de procesos oficiales está pendiente de implementar y validar la normativa específica de nombramiento. Usa una convocatoria de demostración.']);
                 }

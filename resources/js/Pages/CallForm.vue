@@ -54,9 +54,7 @@ const form = useForm({
         },
     ],
     evaluation_mode: props.call?.evaluation_mode ?? null,
-    rubric: copyRubric(
-        props.call?.rubric?.length ? props.call.rubric : defaultRubric(),
-    ),
+    rubric: copyRubric(props.call?.rubric ?? []),
 });
 const usesTemplate = computed(() => form.evaluation_mode === referenceMode);
 const confirmingModeChange = ref(false);
@@ -118,7 +116,7 @@ function submit() {
                     ><label
                         >Modalidad<select
                             v-model="form.modality"
-                            :disabled="usesTemplate || confirmingModeChange"
+                            :disabled="hasVacancies || usesTemplate || confirmingModeChange"
                         >
                             <option value="NOMBRAMIENTO">Nombramiento</option>
                             <option value="CONTRATO">Contrato</option>
@@ -212,10 +210,10 @@ function submit() {
                     <Icon name="Plus" :size="15" />Añadir actividad
                 </button>
             </section>
-            <section v-if="hasVacancies" class="panel">
+            <section v-if="hasVacancies && form.rubric.length" class="panel">
                 <div class="panel-heading">
                     <Icon name="ClipboardCheck" />
-                    <h2>Evaluación de prueba</h2>
+                    <h2>Rúbrica general de demostración</h2>
                 </div>
                 <div
                     v-if="

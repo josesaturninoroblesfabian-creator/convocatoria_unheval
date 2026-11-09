@@ -35,6 +35,17 @@ class VacancyManagementTest extends TestCase
         $this->assertSame(16, $vacancy->weekly_hours);
         $this->assertSame([], $vacancy->requirements);
         $this->assertNull($vacancy->screening_rules);
+        $this->get(route('management.vacancies.external.edit', $vacancy))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('template.modality', 'CONTRATO')
+                ->where('template.category', 'DC A2')
+                ->where('template.minimum', 18)
+            );
+        $callDetails = $call->only(['code', 'title', 'description', 'modality', 'opens_at', 'closes_at', 'schedule', 'rubric', 'is_demo']);
+        $this->put(route('management.calls.update', $call), [...$callDetails, 'modality' => 'NOMBRAMIENTO'])
+            ->assertSessionHasErrors('modality');
+        $this->put(route('management.calls.update', $call), $callDetails)->assertSessionHas('success');
+        $this->assertSame([], $call->fresh()->rubric);
         $this->get(route('management.calls.show', ['recruitmentCall' => $call, 'configurar' => $vacancy->id]))
             ->assertInertia(fn (Assert $page) => $page->where('requirementsVacancyId', $vacancy->id));
     }

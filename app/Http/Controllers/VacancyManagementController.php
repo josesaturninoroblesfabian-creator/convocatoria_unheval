@@ -68,8 +68,14 @@ class VacancyManagementController extends Controller
     {
         DB::transaction(function () use ($request, $vacancy): void {
             $this->lockDraft($vacancy->recruitment_call_id);
-            $vacancy->update($request->safe()->except(['requirements', 'screening_rules']));
-            AuditEvent::record('FICHA_PLAZA_EDITADA', $vacancy);
+            $locked = Vacancy::lockForUpdate()->findOrFail($vacancy->id);
+            $data = $request->safe()->except(['requirements', 'screening_rules']);
+            if ($locked->category !== $data['category'] && $locked->external_evaluation !== null) {
+                $data['external_evaluation'] = null;
+                AuditEvent::record('ASPECTOS_EXTERNOS_REINICIADOS', $locked, ['from' => $locked->category, 'to' => $data['category']]);
+            }
+            $locked->update($data);
+            AuditEvent::record('FICHA_PLAZA_EDITADA', $locked);
         });
 
         return back()->with('success', 'Ficha de la plaza actualizada.');
@@ -154,6 +160,7 @@ class VacancyManagementController extends Controller
         return Inertia::render('VacancyForm', [
             'call' => $call?->only('id', 'code', 'title', 'modality', 'opens_at', 'closes_at'),
             'vacancy' => $vacancy,
+            'hasExternalEvaluation' => $vacancy?->external_evaluation !== null,
             'contractHours' => Vacancy::CONTRACT_HOURS,
             'faculties' => Vacancy::query()->distinct()->orderBy('faculty')->pluck('faculty'),
         ]);
