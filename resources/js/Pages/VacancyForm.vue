@@ -91,7 +91,7 @@ function removeDocument() {
 <template>
     <AppLayout
         :title="vacancy ? 'Editar ficha de plaza' : 'Crear plaza docente'"
-        :subtitle="call.code"
+        :subtitle="'Paso 2 de 3 · Ficha y documentos · ' + call.code"
     >
         <template #actions>
             <Link :href="url(callPath)" class="btn btn-outline">
@@ -525,6 +525,30 @@ function removeDocument() {
                 </form>
             </template>
         </section>
+
+        <div v-if="vacancy" class="notice row between wrap">
+            <div>
+                <strong>Siguiente paso · Requisitos y filtros</strong>
+                <p v-if="form.isDirty || attachment.file">
+                    Guarda los cambios de la ficha o adjunta el PDF seleccionado
+                    antes de continuar.
+                </p>
+                <p v-else>
+                    Define qué debe presentar el postulante y qué comprobaciones
+                    se aplicarán a esta plaza.
+                </p>
+            </div>
+            <Link
+                v-if="
+                    !form.isDirty && !attachment.file && !attachment.processing
+                "
+                :href="url(callPath + '?configurar=' + vacancy.id)"
+                class="btn btn-primary"
+            >
+                Continuar a requisitos y filtros
+                <Icon name="ArrowRight" :size="17" />
+            </Link>
+        </div>
 
         <div
             v-if="selectedDocument"

@@ -11,6 +11,25 @@ use Tests\TestCase;
 
 class VacancyManagementTest extends TestCase
 {
+    public function test_new_call_continues_to_first_vacancy_then_to_its_own_screening_settings(): void
+    {
+        $manager = User::factory()->manager()->create();
+        $data = RecruitmentCall::factory()->make()->only(['code', 'title', 'description', 'modality', 'opens_at', 'closes_at', 'schedule', 'rubric', 'is_demo']);
+        $response = $this->actingAs($manager)->post(route('management.calls.store'), $data);
+        $call = RecruitmentCall::where('code', $data['code'])->sole();
+        $response->assertRedirect(route('management.vacancies.create', $call));
+        $this->get(route('management.calls.edit', $call))->assertInertia(fn (Assert $page) => $page->where('hasVacancies', false));
+
+        $response = $this->post(route('management.vacancies.store', $call), $this->profile());
+        $vacancy = $call->vacancies()->sole();
+        $response->assertRedirect(route('management.vacancies.edit', $vacancy));
+        $this->get(route('management.calls.show', ['recruitmentCall' => $call, 'configurar' => $vacancy->id]))
+            ->assertInertia(fn (Assert $page) => $page->where('requirementsVacancyId', $vacancy->id));
+        $other = RecruitmentCall::factory()->draft()->create();
+        $this->get(route('management.calls.show', ['recruitmentCall' => $other, 'configurar' => $vacancy->id]))
+            ->assertInertia(fn (Assert $page) => $page->where('requirementsVacancyId', null));
+    }
+
     public function test_manager_creates_a_public_profile_then_configures_requirements_separately(): void
     {
         $manager = User::factory()->manager()->create();

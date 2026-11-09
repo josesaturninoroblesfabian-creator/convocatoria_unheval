@@ -5,7 +5,11 @@ import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
 import Errors from "../Components/Errors.vue";
 import { label, url } from "../lib/ui";
-const props = defineProps({ call: Object, nombramientoTemplate: Object });
+const props = defineProps({
+    call: Object,
+    hasVacancies: Boolean,
+    nombramientoTemplate: Object,
+});
 const referenceMode = "nombramiento_referencia";
 const localDate = (value) =>
     value
@@ -44,7 +48,10 @@ const form = useForm({
     closes_at: localDate(props.call?.closes_at),
     is_demo: props.call?.is_demo ?? true,
     schedule: props.call?.schedule || [
-        { label: "Inscripción y presentación de expedientes", date: "" },
+        {
+            label: "Inscripción digital",
+            date: "Consulta la apertura y el cierre de inscripción de esta convocatoria.",
+        },
     ],
     evaluation_mode: props.call?.evaluation_mode ?? null,
     rubric: copyRubric(props.call?.rubric || defaultRubric()),
@@ -92,7 +99,11 @@ function submit() {
 <template>
     <AppLayout
         :title="call ? 'Editar convocatoria' : 'Nueva convocatoria'"
-        subtitle="La convocatoria se guardará como borrador."
+        :subtitle="
+            call
+                ? 'La convocatoria se guardará como borrador.'
+                : 'Paso 1 de 3 · Datos generales'
+        "
         ><Errors :errors="form.errors" />
         <form @submit.prevent="submit" class="editor-form">
             <section class="panel">
@@ -170,41 +181,47 @@ function submit() {
                             required
                     /></label>
                 </div>
-                <h3>Cronograma visible al postulante</h3>
-                <div
-                    v-for="(s, i) in form.schedule"
-                    :key="i"
-                    class="dynamic-row"
-                >
-                    <input
-                        v-model="s.label"
-                        aria-label="Actividad del cronograma"
-                        placeholder="Actividad"
-                        required
-                    /><input
-                        v-model="s.date"
-                        aria-label="Fecha de la actividad"
-                        placeholder="Fecha o rango publicado"
-                        required
-                    /><button
-                        type="button"
-                        class="icon-btn"
-                        aria-label="Quitar actividad"
-                        :disabled="form.schedule.length === 1"
-                        @click="form.schedule.splice(i, 1)"
+                <p v-if="!call" class="muted">
+                    Las actividades de cada plaza se programan al completar su
+                    ficha.
+                </p>
+                <template v-else>
+                    <h3>Cronograma general de la convocatoria</h3>
+                    <div
+                        v-for="(s, i) in form.schedule"
+                        :key="i"
+                        class="dynamic-row"
                     >
-                        <Icon name="X" :size="17" />
+                        <input
+                            v-model="s.label"
+                            aria-label="Actividad del cronograma"
+                            placeholder="Actividad"
+                            required
+                        /><input
+                            v-model="s.date"
+                            aria-label="Fecha de la actividad"
+                            placeholder="Fecha o rango publicado"
+                            required
+                        /><button
+                            type="button"
+                            class="icon-btn"
+                            aria-label="Quitar actividad"
+                            :disabled="form.schedule.length === 1"
+                            @click="form.schedule.splice(i, 1)"
+                        >
+                            <Icon name="X" :size="17" />
+                        </button>
+                    </div>
+                    <button
+                        type="button"
+                        class="btn btn-outline btn-sm"
+                        @click="form.schedule.push({ label: '', date: '' })"
+                    >
+                        <Icon name="Plus" :size="15" />Añadir actividad
                     </button>
-                </div>
-                <button
-                    type="button"
-                    class="btn btn-outline btn-sm"
-                    @click="form.schedule.push({ label: '', date: '' })"
-                >
-                    <Icon name="Plus" :size="15" />Añadir actividad
-                </button>
+                </template>
             </section>
-            <section class="panel">
+            <section v-if="call && hasVacancies" class="panel">
                 <div class="panel-heading">
                     <Icon name="ClipboardCheck" />
                     <h2>Evaluación de prueba</h2>
@@ -400,7 +417,12 @@ function submit() {
                     class="btn btn-primary"
                     :disabled="form.processing || confirmingModeChange"
                 >
-                    {{ form.processing ? "Guardando…" : "Guardar borrador"
+                    {{
+                        form.processing
+                            ? "Guardando…"
+                            : call
+                              ? "Guardar borrador"
+                              : "Continuar a crear plaza"
                     }}<Icon name="Check" :size="18" />
                 </button>
             </div></form

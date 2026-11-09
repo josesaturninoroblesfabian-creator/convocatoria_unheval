@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { Link, useForm } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
@@ -8,7 +8,11 @@ import { defaultScreeningRules, screeningRecordId } from "../lib/screening";
 import Badge from "../Components/Badge.vue";
 import Errors from "../Components/Errors.vue";
 import { url, date, label } from "../lib/ui";
-const props = defineProps({ call: Object, jurors: Array });
+const props = defineProps({
+    call: Object,
+    jurors: Array,
+    requirementsVacancyId: Number,
+});
 const next = {
     BORRADOR: { status: "PUBLICADA", label: "Publicar convocatoria" },
     PUBLICADA: { status: "EN_EVALUACION", label: "Iniciar evaluación" },
@@ -45,6 +49,14 @@ function editScreening(v) {
         JSON.stringify(v.screening_rules || defaultScreeningRules()),
     );
 }
+watch(
+    () => props.requirementsVacancyId,
+    (id) => {
+        const vacancy = props.call.vacancies.find((item) => item.id === id);
+        if (vacancy && props.call.status === "BORRADOR") editScreening(vacancy);
+    },
+    { immediate: true },
+);
 function saveScreening() {
     screeningForm.put(
         url(`/gestion/plazas/${editingScreening.value.id}/formulario`),
@@ -319,6 +331,9 @@ function saveJury() {
             @click.self="editingScreening = null"
         >
             <form class="modal wide-modal" @submit.prevent="saveScreening">
+                <p class="eyebrow">
+                    Paso 3 de 3 · Configuración de postulación
+                </p>
                 <h2>Requisitos y filtros de {{ editingScreening.school }}</h2>
                 <Errors :errors="screeningForm.errors" /><ScreeningEditor
                     v-model="screeningForm.screening_rules"

@@ -61,7 +61,7 @@ class ManagementController extends Controller
 
     public function create(): Response
     {
-        return Inertia::render('CallForm', ['call' => null, 'nombramientoTemplate' => NombramientoRubric::template()]);
+        return Inertia::render('CallForm', ['call' => null]);
     }
 
     public function store(StoreCallRequest $request): RedirectResponse
@@ -73,19 +73,32 @@ class ManagementController extends Controller
             return $call;
         });
 
-        return redirect()->route('management.calls.show', $call)->with('success', 'Borrador creado. Añade las plazas y revisa la configuración.');
+        return redirect()->route('management.vacancies.create', $call)->with('success', 'Convocatoria guardada como borrador. Completa la ficha de la primera plaza.');
     }
 
-    public function show(RecruitmentCall $recruitmentCall): Response
+    public function show(Request $request, RecruitmentCall $recruitmentCall): Response
     {
-        return Inertia::render('ManageCall', ['call' => $recruitmentCall->load('vacancies.jurors:id,name'), 'jurors' => User::where('role', 'jurado')->get(['id', 'name', 'email'])]);
+        $recruitmentCall->load('vacancies.jurors:id,name');
+        $vacancy = $recruitmentCall->status === 'BORRADOR'
+            ? $recruitmentCall->vacancies->firstWhere('id', $request->integer('configurar'))
+            : null;
+
+        return Inertia::render('ManageCall', [
+            'call' => $recruitmentCall,
+            'jurors' => User::where('role', 'jurado')->get(['id', 'name', 'email']),
+            'requirementsVacancyId' => $vacancy?->id,
+        ]);
     }
 
     public function edit(RecruitmentCall $recruitmentCall): Response
     {
         abort_unless($recruitmentCall->status === 'BORRADOR', 409);
 
-        return Inertia::render('CallForm', ['call' => $recruitmentCall, 'nombramientoTemplate' => $recruitmentCall->evaluation_template ?? NombramientoRubric::template()]);
+        return Inertia::render('CallForm', [
+            'call' => $recruitmentCall,
+            'hasVacancies' => $recruitmentCall->vacancies()->exists(),
+            'nombramientoTemplate' => $recruitmentCall->evaluation_template ?? NombramientoRubric::template(),
+        ]);
     }
 
     public function update(StoreCallRequest $request, RecruitmentCall $recruitmentCall): RedirectResponse
