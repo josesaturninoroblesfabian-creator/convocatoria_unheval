@@ -26,9 +26,9 @@ class ApplicationWorkflow
         return $user->role === 'jurado' && $application->vacancy->jurors()->where('users.id', $user->id)->exists();
     }
 
-    public function submit(Application $application, User $user): void
+    public function submit(Application $application, User $user, bool $notifyApplicant = true): void
     {
-        DB::transaction(function () use ($application, $user) {
+        DB::transaction(function () use ($application, $user, $notifyApplicant) {
             $call = RecruitmentCall::lockForUpdate()->findOrFail($application->recruitment_call_id);
             $locked = Application::lockForUpdate()->findOrFail($application->id);
             abort_unless($locked->user_id === $user->id, 404);
@@ -48,9 +48,11 @@ class ApplicationWorkflow
             }
             $snapshot = $user->only('name', 'email', 'document_number', 'phone');
             $hash = hash('sha256', json_encode(['reference' => $locked->reference, 'vacancy_id' => $locked->vacancy_id, 'profile' => $snapshot, 'form' => $locked->form_data, 'screening' => $screeningReport, 'statement' => $locked->statement, 'documents' => $locked->documents->sortBy('requirement_key')->map->only(['requirement_key', 'sha256'])->values()->all()], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
-            $locked->update(['status' => 'RECIBIDA', 'submitted_at' => now(), 'applicant_snapshot' => $snapshot, 'receipt_hash' => $hash, 'screening_snapshot' => $screeningReport['enabled'] ? $screeningReport : null, 'declared_score' => $screeningReport['enabled'] ? $screeningReport['total'] : null]);
+            $locked->update(['status' => 'RECIBIDA', 'submitted_at' => now(), 'applicant_snapshot' => $snapshot, 'receipt_hash' => $hash, 'screening_snapshot' => $screeningReport['enabled'] ? $screeningReport : null, 'declared_score' => $screeningReport['enabled'] && ! $call->evaluation_template ? $screeningReport['total'] : null]);
             AuditEvent::record('EXPEDIENTE_ENVIADO', $locked, ['hash' => $hash]);
-            DB::afterCommit(fn () => $user->notify(new ApplicationReceived($locked)));
+            if ($notifyApplicant) {
+                DB::afterCommit(fn () => $user->notify(new ApplicationReceived($locked)));
+            }
         });
     }
 }

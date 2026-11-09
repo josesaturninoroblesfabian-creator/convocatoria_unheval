@@ -61,7 +61,21 @@ class ApplicationController extends Controller
 
         $application->load('vacancy', 'recruitmentCall', 'documents');
 
-        return Inertia::render('Application', ['application' => $application, 'screening' => $screening->assess($application), 'documentRequirements' => $screening->documents($application)]);
+        $report = $screening->assess($application);
+
+        return Inertia::render('Application', [
+            'application' => $application,
+            'screening' => $report,
+            'documentRequirements' => $screening->documents($application),
+            'profileCredentials' => $application->status === 'BORRADOR'
+                && $application->recruitmentCall->accepting_applications
+                && ($report['rules']['academic_credentials'] ?? false)
+                ? array_values(array_filter(
+                    $request->user()->academic_credentials ?? [],
+                    fn (array $credential): bool => isset(ApplicantScreening::CREDENTIAL_LEVELS[$credential['kind']]),
+                ))
+                : [],
+        ]);
     }
 
     public function update(Request $request, Application $application, ApplicationWorkflow $workflow): RedirectResponse
@@ -87,7 +101,9 @@ class ApplicationController extends Controller
             $workflow->assertOpen($call);
             abort_unless($locked->status === 'BORRADOR', 409);
             abort_unless($locked->vacancy->screening_rules['enabled'] ?? false, 409);
-            $data = array_replace(['experience' => [], 'training' => [], 'answers' => []], $request->safe()->only(['degree', 'professional_title', 'bachelor_date', 'experience', 'training', 'answers']));
+            $data = array_replace(['experience' => [], 'training' => [], 'answers' => []], $request->safe()->only(['degree', 'professional_title', 'bachelor_date', 'credentials', 'experience', 'training', 'answers']));
+            $previousCredentials = array_column($locked->form_data['credentials'] ?? [], null, 'id');
+            $updatedCredentials = array_column($data['credentials'] ?? [], null, 'id');
             $allowedKeys = array_column($locked->vacancy->screening_rules['fields'] ?? [], 'key');
             $data['answers'] = array_intersect_key($data['answers'], array_flip($allowedKeys));
             $details = $request->safe()->only(['statement', 'consent']);
@@ -100,8 +116,13 @@ class ApplicationController extends Controller
             }
             $locked->update($updates);
             $report = $screening->assess($locked);
-            $locked->update(['declared_score' => $report['total']]);
+            $locked->update(['declared_score' => $call->evaluation_template ? null : $report['total']]);
             $allowedDocuments = array_column($screening->documents($locked), 'key');
+            foreach ($previousCredentials as $id => $credential) {
+                if ($credential != ($updatedCredentials[$id] ?? null)) {
+                    $allowedDocuments = array_diff($allowedDocuments, ['acad_'.$id]);
+                }
+            }
             foreach ($locked->documents()->whereNotIn('requirement_key', $allowedDocuments)->get() as $document) {
                 $path = $document->path;
                 $document->delete();
@@ -126,6 +147,9 @@ class ApplicationController extends Controller
             $screening->assertEligible($locked);
             $file = $request->file('file');
             $key = $request->string('requirement_key')->toString();
+            if (! in_array($key, array_column($screening->documents($locked), 'key'), true)) {
+                throw ValidationException::withMessages(['requirement_key' => 'El requisito cambió. Actualiza la página antes de adjuntar el documento.']);
+            }
             $old = $locked->documents()->where('requirement_key', $key)->first();
             $path = $file->store('expedientes/'.$locked->id, 'local');
             if (! $path) {

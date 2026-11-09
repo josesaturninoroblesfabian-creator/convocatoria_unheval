@@ -13,6 +13,7 @@ const props = defineProps({
     application: Object,
     screening: Object,
     documentRequirements: Array,
+    profileCredentials: Array,
 });
 const step = ref(props.application.submitted_at ? 3 : 1);
 const sending = ref(false);
@@ -26,6 +27,11 @@ const editable = computed(
     () =>
         props.application.status === "BORRADOR" &&
         isOpen(props.application.recruitment_call),
+);
+const usesAppointmentTemplate = computed(
+    () =>
+        props.application.recruitment_call.evaluation_mode ===
+        "nombramiento_referencia",
 );
 const doc = (key) =>
     props.application.documents.find((d) => d.requirement_key === key);
@@ -148,6 +154,7 @@ function submit() {
                     <StructuredApplicationForm
                         :application="application"
                         :report="screening"
+                        :profile-credentials="profileCredentials"
                         :editable="editable"
                         @continue="step = 2"
                     />
@@ -283,6 +290,11 @@ function submit() {
                             }}
                         </h2>
                     </div>
+                    <p v-if="usesAppointmentTemplate" class="notice">
+                        La comisión verificará los sustentos y determinará la
+                        aptitud y la calificación según la plantilla de
+                        evaluación de la convocatoria.
+                    </p>
                     <template v-if="application.submitted_at"
                         ><div class="submission-success">
                             <Icon name="CheckCircle2" :size="46" />

@@ -4,6 +4,7 @@ use App\Http\Controllers\ApplicationController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ManagementController;
 use App\Http\Controllers\PortalController;
+use App\Http\Controllers\ProfileLookupController;
 use App\Http\Controllers\ReviewController;
 use Illuminate\Support\Facades\Route;
 
@@ -17,6 +18,7 @@ Route::middleware('guest')->group(function () {
     Route::post('/ingresar', [AuthController::class, 'authenticate'])->middleware('throttle:login');
     Route::get('/registro', [AuthController::class, 'register'])->name('register');
     Route::post('/registro', [AuthController::class, 'store'])->middleware('throttle:5,1');
+    Route::post('/registro/consultar-dni', [AuthController::class, 'lookupRegistrationDni'])->middleware('throttle:registration-dni')->name('register.dni.lookup');
     Route::get('/recuperar-acceso', [AuthController::class, 'forgot'])->name('password.request');
     Route::post('/recuperar-acceso', [AuthController::class, 'sendReset'])->middleware('throttle:3,1')->name('password.email');
     Route::get('/restablecer/{token}', [AuthController::class, 'reset'])->name('password.reset');
@@ -27,8 +29,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/panel', [ManagementController::class, 'dashboard'])->name('dashboard');
     Route::get('/perfil', [ManagementController::class, 'profile'])->name('profile');
     Route::put('/perfil', [ManagementController::class, 'updateProfile'])->name('profile.update');
+    Route::put('/perfil/formacion', [ManagementController::class, 'updateAcademicProfile'])->name('profile.academic.update');
     Route::get('/documentos/{document}', [ApplicationController::class, 'document'])->name('documents.show');
     Route::middleware('role:postulante')->group(function () {
+        Route::post('/perfil/consultar-registro', ProfileLookupController::class)->middleware('throttle:profile-registry')->name('profile.registry.lookup');
         Route::get('/mis-postulaciones', [ApplicationController::class, 'index'])->name('applications.index');
         Route::post('/plazas/{vacancy}/postular', [ApplicationController::class, 'store'])->name('applications.store');
         Route::get('/mis-postulaciones/{application}', [ApplicationController::class, 'show'])->name('applications.show');

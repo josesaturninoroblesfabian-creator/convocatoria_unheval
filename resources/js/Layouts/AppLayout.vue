@@ -7,11 +7,25 @@ defineProps({ title: String, subtitle: String });
 const page = usePage();
 const open = ref(false);
 const user = computed(() => page.props.auth.user);
+const applicant = computed(() => user.value.role === "postulante");
+const juror = computed(() => user.value.role === "jurado");
+const roleLabel = computed(
+    () =>
+        ({
+            administrador: "Administrador",
+            gestor: "Gestor",
+            jurado: "Jurado",
+            postulante: "Postulante",
+        })[user.value.role],
+);
 const manager = computed(() =>
     ["administrador", "gestor"].includes(user.value.role),
 );
 const items = computed(() => [
-    { label: "Resumen", path: "/panel", icon: "LayoutDashboard" },
+    { label: "Inicio", path: "/panel", icon: "LayoutDashboard" },
+    ...(applicant.value
+        ? [{ label: "Mi perfil y méritos", path: "/perfil", icon: "Settings2" }]
+        : []),
     ...(manager.value
         ? [
               {
@@ -21,7 +35,7 @@ const items = computed(() => [
               },
           ]
         : []),
-    ...(user.value.role === "postulante"
+    ...(applicant.value
         ? [
               {
                   label: "Mis postulaciones",
@@ -31,7 +45,7 @@ const items = computed(() => [
           ]
         : [
               {
-                  label: "Expedientes",
+                  label: juror.value ? "Expedientes asignados" : "Expedientes recibidos",
                   path: "/expedientes",
                   icon: "ClipboardCheck",
               },
@@ -54,17 +68,20 @@ const items = computed(() => [
               },
           ]
         : []),
-    { label: "Mi perfil", path: "/perfil", icon: "Settings2" },
+    ...(applicant.value
+        ? []
+        : [{ label: "Mi perfil", path: "/perfil", icon: "Settings2" }]),
 ]);
+const currentPath = computed(() => page.url.split("?")[0]);
 const active = (path) =>
-    page.url.split("?")[0] === url(path) ||
-    (path !== "/panel" && page.url.startsWith(url(path + "/")));
+    currentPath.value === url(path) ||
+    currentPath.value.startsWith(url(path + "/"));
 </script>
 <template>
     <Head :title="title" />
-    <div class="app-layout">
-        <aside class="sidebar" :class="{ 'sidebar-open': open }">
-            <Link :href="url('/')" class="sidebar-brand"
+    <div class="app-layout" @keydown.esc="open = false">
+        <aside id="workspace-navigation" class="sidebar" :class="{ 'sidebar-open': open }">
+            <Link :href="url('/panel')" class="sidebar-brand" aria-label="UNHEVAL, inicio del panel"
                 ><img :src="url('/images/unheval.png')" alt="UNHEVAL" /><span
                     >CONVOCATORIAS DOCENTES</span
                 ></Link
@@ -73,17 +90,19 @@ const active = (path) =>
                 {{
                     manager
                         ? "GESTIÓN ACADÉMICA"
-                        : user.role === "jurado"
+                        : juror
                           ? "COMISIÓN EVALUADORA"
                           : "ESPACIO DEL POSTULANTE"
                 }}
             </div>
-            <nav>
+            <nav aria-label="Navegación del panel">
                 <Link
                     v-for="item in items"
                     :key="item.path"
                     :href="url(item.path)"
                     :class="{ active: active(item.path) }"
+                    :aria-current="currentPath === url(item.path) ? 'page' : active(item.path) ? 'location' : undefined"
+                    @click="open = false"
                     ><Icon :name="item.icon" :size="20" />{{ item.label }}</Link
                 >
             </nav>
@@ -95,8 +114,7 @@ const active = (path) =>
                     <p>Los procesos demo no tienen validez oficial.</p>
                 </div>
                 <Link :href="url('/')"
-                    ><Icon name="ExternalLink" :size="18" />Ver portal
-                    público</Link
+                    ><Icon name="ExternalLink" :size="18" />{{ applicant ? "Buscar plazas" : "Ver portal público" }}</Link
                 ><Link :href="url('/ayuda')"
                     ><Icon name="HelpCircle" :size="18" />Centro de ayuda</Link
                 >
@@ -105,7 +123,7 @@ const active = (path) =>
                 <span class="avatar">{{ user.name.slice(0, 1) }}</span>
                 <div>
                     <b>{{ user.name }}</b
-                    ><small>{{ user.role }}</small>
+                    ><small>{{ roleLabel }}</small>
                 </div>
                 <Link
                     :href="url('/salir')"
@@ -123,7 +141,10 @@ const active = (path) =>
                 <div class="row">
                     <button
                         class="mobile-menu icon-btn"
-                        aria-label="Abrir navegación"
+                        type="button"
+                        :aria-label="open ? 'Cerrar navegación' : 'Abrir navegación'"
+                        :aria-expanded="open"
+                        aria-controls="workspace-navigation"
                         @click="open = !open"
                     >
                         <Icon name="Menu" /></button
@@ -144,7 +165,7 @@ const active = (path) =>
             <main class="workspace-main">
                 <div class="page-title">
                     <div>
-                        <div class="eyebrow">UNHEVAL / {{ user.role }}</div>
+                        <div class="eyebrow">UNHEVAL / {{ roleLabel }}</div>
                         <h1>{{ title }}</h1>
                         <p v-if="subtitle">{{ subtitle }}</p>
                     </div>

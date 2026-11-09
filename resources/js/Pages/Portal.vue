@@ -3,7 +3,6 @@ import { ref } from "vue";
 import { Link, router } from "@inertiajs/vue3";
 import PublicLayout from "../Layouts/PublicLayout.vue";
 import Icon from "../Components/Icon.vue";
-import Badge from "../Components/Badge.vue";
 import Pagination from "../Components/Pagination.vue";
 import { url, date, label } from "../lib/ui";
 import { useApplicationWindow } from "../lib/useApplicationWindow";
@@ -12,7 +11,6 @@ const props = defineProps({
     vacancies: Object,
     filters: Object,
     faculties: Array,
-    calls: Array,
     stats: Object,
 });
 const search = ref(props.filters.q || "");
@@ -175,84 +173,7 @@ function tab(value) {
                     >Ordenadas por publicación más reciente</span
                 >
             </div>
-            <div class="process-table table-scroll">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Convocatoria</th>
-                            <th>Documentos de referencia</th>
-                            <th>Inscripción / estado</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="call in calls" :key="call.id">
-                            <td>
-                                <Link
-                                    :href="url('/convocatorias/' + call.id)"
-                                    class="process-title"
-                                    >{{ call.title }}</Link
-                                >
-                                <p>
-                                    {{ call.code }} ·
-                                    {{ call.vacancies_count }} plazas
-                                </p>
-                                <small v-if="call.is_demo" class="muted"
-                                    >Caso práctico con perfiles del cuadro
-                                    2026-IV</small
-                                >
-                            </td>
-                            <td>
-                                <div class="process-docs">
-                                    <a
-                                        v-for="doc in call.public_documents"
-                                        :key="doc.path"
-                                        :href="url(doc.path)"
-                                        target="_blank"
-                                        rel="noopener"
-                                        class="btn btn-outline btn-sm"
-                                        ><Icon name="FileText" :size="14" />{{
-                                            doc.name
-                                        }}</a
-                                    >
-                                </div>
-                            </td>
-                            <td>
-                                <div class="process-state">
-                                    <Badge :value="call.status" /><span
-                                        class="muted"
-                                        >{{ date(call.opens_at, true) }}<br />al
-                                        {{ date(call.closes_at, true) }}</span
-                                    ><span>{{
-                                        isOpen(call)
-                                            ? "Ya puedes postular"
-                                            : call.status === "PUBLICADA" &&
-                                                new Date(call.opens_at) >
-                                                    new Date()
-                                              ? "Próximamente"
-                                              : "Inscripción cerrada"
-                                    }}</span>
-                                </div>
-                            </td>
-                            <td>
-                                <Link
-                                    :href="url('/convocatorias/' + call.id)"
-                                    class="btn btn-primary btn-sm"
-                                    >Ver plazas<Icon
-                                        name="ArrowRight"
-                                        :size="14"
-                                /></Link>
-                            </td>
-                        </tr>
-                        <tr v-if="!calls.length">
-                            <td colspan="4">
-                                No hay convocatorias con estos filtros.
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <h3 class="section-heading">Plazas con inscripción disponible</h3>
+            <h3 class="section-heading">Plazas docentes</h3>
             <div class="panel table-scroll plaza-list-table">
                 <table>
                     <thead>
@@ -260,7 +181,8 @@ function tab(value) {
                             <th>Plaza / escuela profesional</th>
                             <th>Facultad</th>
                             <th>Categoría</th>
-                            <th>Cierre</th>
+                            <th>Inscripción</th>
+                            <th>Documentos</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -285,7 +207,46 @@ function tab(value) {
                                 >
                             </td>
                             <td>
-                                {{ date(v.recruitment_call.closes_at, true) }}
+                                {{
+                                    isOpen(v.recruitment_call)
+                                        ? "Abierta"
+                                        : v.recruitment_call.status ===
+                                                "PUBLICADA" &&
+                                            Date.parse(
+                                                v.recruitment_call.opens_at,
+                                            ) > Date.now()
+                                          ? "Próximamente"
+                                          : "Cerrada"
+                                }}
+                                <small
+                                    >Cierre:
+                                    {{
+                                        date(v.recruitment_call.closes_at, true)
+                                    }}</small
+                                >
+                            </td>
+                            <td>
+                                <div
+                                    v-if="
+                                        v.recruitment_call.public_documents
+                                            ?.length
+                                    "
+                                    class="process-docs"
+                                >
+                                    <a
+                                        v-for="doc in v.recruitment_call
+                                            .public_documents"
+                                        :key="doc.path"
+                                        :href="url(doc.path)"
+                                        target="_blank"
+                                        rel="noopener"
+                                        class="btn btn-outline btn-sm"
+                                        ><Icon
+                                            name="FileText"
+                                            :size="14"
+                                        />{{ doc.name }}</a
+                                    >
+                                </div>
                             </td>
                             <td>
                                 <Link

@@ -5,21 +5,30 @@ import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
 import PdfViewer from "../Components/PdfViewer.vue";
 import ScreeningSummary from "../Components/ScreeningSummary.vue";
+import NombramientoEvaluation from "../Components/NombramientoEvaluation.vue";
 import Badge from "../Components/Badge.vue";
 import Errors from "../Components/Errors.vue";
+import { academicCredentialLabels } from "../lib/screening";
 import { url, date, shortRef } from "../lib/ui";
 const props = defineProps({
     application: Object,
     screening: Object,
+    verifiedScreening: Object,
     documentRequirements: Array,
     canReview: Boolean,
     ownEvaluation: Object,
     evaluationCount: Number,
     juryCount: Number,
+    evaluationTemplate: Object,
+    evaluationProgress: Object,
 });
+const usesCredentials = computed(
+    () => !!props.screening?.rules?.academic_credentials,
+);
 const selected = ref(props.application.documents[0]?.id);
 const eligibility = useForm({
     notes: "",
+    ...(usesCredentials.value ? { academic_profile_confirmed: "" } : {}),
     documents: Object.fromEntries(
         props.application.documents.map((d) => [d.id, ""]),
     ),
@@ -39,6 +48,42 @@ const canWrite = computed(
         props.canReview &&
         props.application.recruitment_call.status === "EN_EVALUACION",
 );
+const reviewStep = computed(() => {
+    if (props.application.status === "RECIBIDA") {
+        return {
+            title: "1. Verificar requisitos",
+            detail: "Contrasta los datos declarados con los PDF y registra la aptitud.",
+        };
+    }
+    if (props.application.status === "NO_APTO") {
+        return {
+            title: "Revisión de aptitud cerrada",
+            detail: "Consulta el motivo registrado en el expediente.",
+        };
+    }
+    if (props.evaluationProgress?.stage === "EXTERNA") {
+        return {
+            title: "2. Evaluación externa",
+            detail: "La comisión revisa los méritos y confirma la misma hoja de puntajes.",
+        };
+    }
+    if (props.evaluationProgress?.stage === "INTERNA") {
+        return {
+            title: "3. Evaluación interna",
+            detail: "Cada jurado califica los criterios de sílabo, clase modelo y entrevista.",
+        };
+    }
+    if (props.application.status === "EVALUADA") {
+        return {
+            title: "Evaluación cerrada",
+            detail: "Consulta el resultado registrado para este expediente.",
+        };
+    }
+    return {
+        title: "Calificar expediente",
+        detail: "Registra los puntajes sustentados en los documentos del expediente.",
+    };
+});
 const total = computed(() =>
     Object.values(evaluation.scores)
         .reduce((s, n) => s + Number(n || 0), 0)
@@ -49,11 +94,24 @@ const hasCalculatedCriteria = computed(() =>
         ["formacion", "experiencia", "capacitacion"].includes(r.key),
     ),
 );
+const academicRequirements = computed(() =>
+    (props.application.vacancy.requirements ?? []).filter((requirement) =>
+        ["titulo", "grado", "bachiller"].includes(requirement.key),
+    ),
+);
+const calculatedScreening = computed(
+    () =>
+        props.verifiedScreening ??
+        (usesCredentials.value ? null : props.screening),
+);
 function useCalculatedScores() {
+    const report = calculatedScreening.value;
+    if (!report) return;
+
     const values = {
-        formacion: props.screening.academic_points,
-        experiencia: props.screening.experience_points,
-        capacitacion: props.screening.training_points,
+        formacion: report.academic_points,
+        experiencia: report.experience_points,
+        capacitacion: report.training_points,
     };
     const applicable = props.application.recruitment_call.rubric.filter((r) =>
         Object.hasOwn(values, r.key),
@@ -87,9 +145,16 @@ function grade() {
         :subtitle="'Expediente ' + shortRef(application.reference)"
         ><template #actions
             ><Badge :value="application.status" /><Link
-                :href="url('/expedientes')"
+                :href="
+                    url(
+                        '/expedientes?call=' +
+                            application.recruitment_call_id +
+                            '&sort=recent',
+                    )
+                "
                 class="btn btn-outline btn-sm"
-                ><Icon name="ArrowLeft" :size="16" />Volver</Link
+                ><Icon name="ArrowLeft" :size="16" />Expedientes de la
+                convocatoria</Link
             ></template
         >
         <div v-if="application.recruitment_call.is_demo" class="demo-notice">
@@ -109,10 +174,55 @@ function grade() {
                 ><b>{{ date(application.submitted_at, true) }}</b>
             </div>
         </section>
-        <ScreeningSummary :report="screening" />
+        <div class="notice row between wrap">
+            <div>
+                <b>{{ reviewStep.title }}</b>
+                <p>{{ reviewStep.detail }}</p>
+            </div>
+            <a href="#revision-etapa" class="btn btn-outline btn-sm"
+                >Ir a la etapa actual</a
+            >
+        </div>
+        <ScreeningSummary
+            :report="screening"
+            :show-points="!evaluationTemplate"
+        />
+        <ScreeningSummary
+            v-if="verifiedScreening"
+            :report="verifiedScreening"
+            :show-points="!evaluationTemplate"
+            verified
+        />
         <section v-if="application.form_data" class="panel">
             <h3>Datos declarados y sustentos a comprobar</h3>
-            <p>
+            <template v-if="application.form_data.credentials?.length">
+                <template v-if="academicRequirements.length">
+                    <h4>Perfil académico de la plaza</h4>
+                    <div
+                        v-for="requirement in academicRequirements"
+                        :key="requirement.key"
+                        class="schedule-row"
+                    >
+                        <span>{{ requirement.label }}</span>
+                        <b>{{
+                            requirement.required ? "Obligatorio" : "Opcional"
+                        }}</b>
+                    </div>
+                </template>
+                <h4>Grados, títulos y especialidades</h4>
+                <div
+                    v-for="credential in application.form_data.credentials"
+                    :key="credential.id"
+                    class="schedule-row"
+                >
+                    <span>
+                        {{ academicCredentialLabels[credential.kind] }} ·
+                        {{ credential.name }} · {{ credential.institution }}
+                    </span>
+                    <b>{{ credential.awarded_at }}</b>
+                </div>
+            </template>
+            <p v-else>
                 Título: {{ application.form_data.professional_title }} · Grado:
                 {{ application.form_data.degree }} · Bachiller:
                 {{ application.form_data.bachelor_date }}
@@ -185,7 +295,7 @@ function grade() {
                     El expediente no tiene archivos adjuntos.
                 </div>
             </section>
-            <aside class="panel evaluation-panel">
+            <aside id="revision-etapa" class="panel evaluation-panel">
                 <div class="panel-heading">
                     <Icon name="ClipboardCheck" />
                     <h2>
@@ -211,8 +321,15 @@ function grade() {
                     @submit.prevent="aptitude"
                 >
                     <p class="muted">
-                        Revisa cada archivo. Si un sustento obligatorio no
-                        cumple, el expediente queda como no apto.
+                        Revisa cada archivo y registra el resultado.
+                        <template v-if="usesCredentials">
+                            La aptitud se determina con los requisitos de la
+                            plaza y las credenciales que resulten acreditadas.
+                        </template>
+                        <template v-else>
+                            Si un sustento obligatorio no cumple, el expediente
+                            queda como no apto.
+                        </template>
                     </p>
                     <div
                         v-for="r in documentRequirements"
@@ -221,7 +338,11 @@ function grade() {
                     >
                         <b>{{ r.label }}</b
                         ><small>{{
-                            r.required ? "Obligatorio" : "Opcional"
+                            r.required_for_aptitude === false
+                                ? "Sustento académico"
+                                : r.required
+                                  ? "Obligatorio"
+                                  : "Opcional"
                         }}</small
                         ><template
                             v-for="d in application.documents.filter(
@@ -257,6 +378,21 @@ function grade() {
                             >Sin archivo adjunto</span
                         >
                     </div>
+                    <label v-if="usesCredentials">
+                        ¿Las credenciales acreditadas cumplen el perfil
+                        académico de la plaza?
+                        <select
+                            v-model="eligibility.academic_profile_confirmed"
+                            :disabled="!canWrite"
+                            required
+                        >
+                            <option value="" disabled>
+                                Selecciona el resultado
+                            </option>
+                            <option :value="true">Cumple</option>
+                            <option :value="false">No cumple</option>
+                        </select>
+                    </label>
                     <label
                         >Motivación de la decisión<textarea
                             v-model="eligibility.notes"
@@ -282,6 +418,15 @@ function grade() {
                     <strong>Expediente no apto</strong>
                     <p>{{ application.review_notes }}</p>
                 </div>
+                <NombramientoEvaluation
+                    v-else-if="evaluationTemplate"
+                    :key="application.id"
+                    :application-id="application.id"
+                    :template="evaluationTemplate"
+                    :progress="evaluationProgress"
+                    :own-evaluation="ownEvaluation"
+                    :can-write="canWrite && application.status === 'APTO'"
+                />
                 <form v-else-if="canReview" @submit.prevent="confirming = true">
                     <div class="notice">
                         <strong
@@ -298,7 +443,7 @@ function grade() {
                         v-if="
                             canWrite &&
                             !ownEvaluation &&
-                            screening?.enabled &&
+                            calculatedScreening?.enabled &&
                             hasCalculatedCriteria &&
                             application.status === 'APTO'
                         "
@@ -306,11 +451,21 @@ function grade() {
                         class="btn btn-outline full"
                         @click="useCalculatedScores"
                     >
-                        Usar cálculo de formación, experiencia y capacitación
+                        {{
+                            usesCredentials
+                                ? "Usar cálculo con los sustentos verificados"
+                                : "Usar cálculo de formación, experiencia y capacitación"
+                        }}
                     </button>
-                    <p class="footnote">
+                    <p
+                        v-if="
+                            calculatedScreening?.enabled &&
+                            hasCalculatedCriteria
+                        "
+                        class="footnote"
+                    >
                         El cálculo solo rellena tu borrador de calificación.
-                        Puedes corregirlo según los documentos; la clase y la
+                        Puedes corregirlo según los documentos. La clase y la
                         entrevista se califican por separado.
                     </p>
                     <label

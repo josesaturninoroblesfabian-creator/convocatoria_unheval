@@ -5,66 +5,91 @@ import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
 import Badge from "../Components/Badge.vue";
 import { url, date, shortRef } from "../lib/ui";
-defineProps({
+import { useApplicationWindow } from "../lib/useApplicationWindow";
+const props = defineProps({
     stats: Object,
     applications: Array,
-    events: Array,
     calls: Array,
 });
 const user = usePage().props.auth.user;
 const applicant = user.role === "postulante";
-const greeting = computed(() => user.name.split(" ")[0]);
+const juror = user.role === "jurado";
+const isOpen = useApplicationWindow();
+const title = applicant ? "Inicio del postulante" : juror ? "Panel del jurado" : "Panel de gestión";
+const nextAction = computed(() => {
+    if (applicant) {
+        const draft = props.applications?.find(
+            (item) => item.status === "BORRADOR" && isOpen(item.recruitment_call),
+        );
+        return draft
+            ? {
+                  text: `Tienes un borrador para ${draft.vacancy.school}. Revisa tus datos y adjunta los sustentos antes de enviarlo.`,
+                  label: "Continuar borrador",
+                  path: `/mis-postulaciones/${draft.id}`,
+              }
+            : {
+                  text: "Consulta el perfil y el cronograma de las plazas. Puedes guardar tus datos y méritos para reutilizarlos al postular.",
+                  label: "Buscar plazas",
+                  path: "/",
+              };
+    }
+
+    if (juror) {
+        const pending = props.applications?.find(
+            (item) =>
+                item.status === "RECIBIDA" &&
+                item.recruitment_call.status === "EN_EVALUACION",
+        );
+        return pending
+            ? {
+                  text: `Hay un expediente por revisar para ${pending.vacancy.school}. Empieza por comprobar los requisitos y los PDF.`,
+                  label: "Revisar expediente",
+                  path: `/expedientes/${pending.id}`,
+              }
+            : {
+                  text: "Consulta los expedientes de tus plazas asignadas y comprueba en qué etapa se encuentran.",
+                  label: "Ver expedientes asignados",
+                  path: "/expedientes?sort=recent",
+              };
+    }
+
+    const draft = props.calls?.find((call) => call.status === "BORRADOR");
+    if (draft) {
+        return {
+            text: `Tienes una convocatoria en borrador: ${draft.title}. Revisa las plazas, las fechas y la comisión antes de publicar.`,
+            label: "Continuar convocatoria",
+            path: `/gestion/convocatorias/${draft.id}`,
+        };
+    }
+    const inReview = props.calls?.find((call) => call.status === "EN_EVALUACION");
+    if (inReview) {
+        return {
+            text: `${inReview.title} está en evaluación. Consulta sus expedientes y el avance de la comisión.`,
+            label: "Seguir evaluación",
+            path: `/expedientes?call=${inReview.id}&sort=recent`,
+        };
+    }
+    return {
+        text: "Define el cronograma, añade las plazas y asigna la comisión que revisará los expedientes.",
+        label: "Nueva convocatoria",
+        path: "/gestion/convocatorias/nueva",
+    };
+});
+const steps = applicant
+    ? ["Consulta la plaza y su cronograma.", "Completa el formulario y adjunta los sustentos.", "Confirma el envío y descarga el cargo."]
+    : juror
+      ? ["Verifica los requisitos y registra la aptitud.", "Revisa los méritos y confirma la hoja externa si el concurso usa etapas.", "Registra tu calificación cuando se habilite."]
+      : ["Configura las plazas y el cronograma.", "Asigna jurados y publica la convocatoria.", "Da seguimiento a la revisión y publica los resultados."];
 </script>
 <template>
-    <AppLayout
-        title="Resumen"
-        subtitle="Toda la información que necesitas, en un solo lugar."
-        ><template #actions
-            ><Link
-                v-if="['administrador', 'gestor'].includes(user.role)"
-                :href="url('/gestion/convocatorias/nueva')"
-                class="btn btn-primary"
-                ><Icon name="Plus" :size="18" />Nueva convocatoria</Link
-            ><Link
-                v-else-if="applicant"
-                :href="url('/')"
-                class="btn btn-primary"
-                >Explorar plazas <Icon name="ArrowUpRight" :size="18" /></Link
-        ></template>
+    <AppLayout :title="title">
         <section class="welcome-card">
             <div>
-                <span class="eyebrow">{{
-                    applicant
-                        ? "TU VOCACIÓN TIENE UN LUGAR AQUÍ"
-                        : "VICERRECTORADO ACADÉMICO"
-                }}</span>
-                <h2>
-                    Hola, {{ greeting }} <span class="greeting-dot">.</span>
-                </h2>
-                <p>
-                    {{
-                        applicant
-                            ? "Prepara tu expediente con calma. Puedes guardar tu avance y continuar después."
-                            : "Acompaña cada etapa del concurso con información organizada y trazable."
-                    }}
-                </p>
-                <Link
-                    :href="
-                        url(
-                            applicant
-                                ? '/mis-postulaciones'
-                                : user.role === 'jurado'
-                                  ? '/expedientes'
-                                  : '/gestion/convocatorias',
-                        )
-                    "
-                    >{{
-                        applicant
-                            ? "Ver mis postulaciones"
-                            : user.role === "jurado"
-                              ? "Revisar expedientes"
-                              : "Gestionar convocatorias"
-                    }}<Icon name="ArrowRight" :size="17"
+                <span class="eyebrow">PRÓXIMO PASO</span>
+                <h2>Hola, {{ user.name.split(" ")[0] }}</h2>
+                <p>{{ nextAction.text }}</p>
+                <Link :href="url(nextAction.path)"
+                    >{{ nextAction.label }} <Icon name="ArrowRight" :size="17"
                 /></Link>
             </div>
             <div class="welcome-illustration">
@@ -75,12 +100,12 @@ const greeting = computed(() => user.name.split(" ")[0]);
             <article
                 v-for="(metric, i) in [
                     {
-                        label: 'Convocatorias registradas',
+                        label: juror ? 'Convocatorias asignadas' : 'Convocatorias registradas',
                         value: stats.calls,
                         icon: 'BriefcaseBusiness',
                     },
                     {
-                        label: 'Plazas en el sistema',
+                        label: juror ? 'Plazas asignadas' : 'Plazas registradas',
                         value: stats.vacancies,
                         icon: 'GraduationCap',
                     },
@@ -145,16 +170,10 @@ const greeting = computed(() => user.name.split(" ")[0]);
                     <p>
                         {{
                             applicant
-                                ? "Explora las plazas y elige la que se ajuste a tu perfil."
+                                ? "Tus borradores y expedientes enviados aparecerán aquí."
                                 : "Los expedientes aparecerán aquí cuando los postulantes confirmen su envío."
                         }}
                     </p>
-                    <Link
-                        v-if="applicant"
-                        :href="url('/')"
-                        class="btn btn-outline btn-sm"
-                        >Buscar una plaza</Link
-                    >
                 </div>
                 <Link
                     v-for="a in applications"
@@ -190,65 +209,26 @@ const greeting = computed(() => user.name.split(" ")[0]);
             </section>
             <aside class="panel tips-panel">
                 <div class="panel-heading">
-                    <Icon name="ShieldCheck" />
-                    <h2>
-                        {{
-                            applicant
-                                ? "Antes de enviar"
-                                : "Un proceso trazable"
-                        }}
-                    </h2>
+                    <Icon name="ClipboardCheck" />
+                    <h2>Tu recorrido</h2>
                 </div>
-                <template v-if="applicant"
-                    ><p>
-                        Verifica los requisitos de la plaza y adjunta tus
-                        documentos en PDF.
-                    </p>
-                    <ul class="tips-list">
-                        <li>
-                            <Icon name="CheckCircle2" :size="17" /> Archivos de
-                            hasta 5 MB
-                        </li>
-                        <li>
-                            <Icon name="CheckCircle2" :size="17" /> Una plaza
-                            por convocatoria
-                        </li>
-                        <li>
-                            <Icon name="CheckCircle2" :size="17" /> Cargo
-                            disponible tras el envío
-                        </li>
-                    </ul></template
-                ><template v-else
-                    ><p>
-                        Las acciones importantes quedan registradas con su fecha
-                        y responsable.
-                    </p>
-                    <div
-                        v-for="event in events?.slice(0, 4)"
-                        :key="event.id"
-                        class="activity-item"
-                    >
-                        <span></span>
-                        <div>
-                            <b>{{
-                                event.action.replaceAll("_", " ").toLowerCase()
-                            }}</b
-                            ><small>{{ date(event.created_at, true) }}</small>
-                        </div>
-                    </div>
-                    <p v-if="user.role === 'jurado'">
-                        Solo puedes consultar y calificar los expedientes de las
-                        plazas que tienes asignadas.
-                    </p></template
-                ><Link :href="url('/ayuda')" class="text-link"
-                    >Consultar guía <Icon name="ArrowUpRight" :size="16"
-                /></Link>
+                <ol class="tips-list">
+                    <li v-for="(step, index) in steps" :key="step">
+                        <span class="badge">{{ index + 1 }}</span> {{ step }}
+                    </li>
+                </ol>
+                <Link v-if="applicant" :href="url('/perfil')" class="text-link">
+                    Abrir mi perfil y méritos <Icon name="ArrowRight" :size="16" />
+                </Link>
+                <Link v-else :href="url('/ayuda')" class="text-link">
+                    Consultar guía <Icon name="ArrowUpRight" :size="16" />
+                </Link>
             </aside>
         </div>
         <section v-if="calls?.length" class="panel">
             <div class="panel-heading">
                 <Icon name="CalendarDays" />
-                <h2>Procesos registrados</h2>
+                <h2>{{ juror ? "Convocatorias asignadas" : "Convocatorias recientes" }}</h2>
             </div>
             <div class="table-scroll">
                 <table>
@@ -269,6 +249,11 @@ const greeting = computed(() => user.name.split(" ")[0]);
                                     :href="
                                         url('/gestion/convocatorias/' + c.id)
                                     "
+                                    class="table-title"
+                                    >{{ c.title }}</Link
+                                ><Link
+                                    v-else-if="c.status !== 'BORRADOR'"
+                                    :href="url('/expedientes?call=' + c.id + '&sort=recent')"
                                     class="table-title"
                                     >{{ c.title }}</Link
                                 ><b v-else>{{ c.title }}</b

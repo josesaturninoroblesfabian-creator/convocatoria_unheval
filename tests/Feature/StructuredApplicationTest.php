@@ -62,6 +62,67 @@ class StructuredApplicationTest extends TestCase
         $this->assertSame('14.000', $application->fresh()->declared_score);
     }
 
+    public function test_multiple_credentials_are_supported_and_only_the_best_verified_grade_and_one_title_score(): void
+    {
+        Notification::fake();
+        Storage::fake('local');
+        $application = $this->application(['academic_credentials' => true]);
+        $data = [...$this->payload(), 'consent' => true];
+        $data['credentials'] = array_map(
+            fn (string $kind): array => ['id' => (string) Str::uuid(), 'kind' => $kind, 'name' => 'Credencial de prueba', 'institution' => 'Universidad de prueba', 'awarded_at' => '2012-01-01'],
+            ['bachiller', 'bachiller', 'titulo', 'titulo', 'maestro', 'doctor'],
+        );
+        $path = '/mis-postulaciones/'.$application->id;
+        $this->actingAs($application->user)->put($path.'/formulario', $data)->assertSessionHas('success');
+        $application->refresh();
+        $this->assertSame($data['credentials'], $application->form_data['credentials']);
+        $this->assertArrayNotHasKey('degree', $application->form_data);
+        $this->get($path)->assertInertia(fn (Assert $page) => $page->where('screening.academic_points', 10));
+        $doctorKey = 'acad_'.$data['credentials'][5]['id'];
+        $requirements = app(ApplicantScreening::class)->documents($application);
+        foreach ($requirements as $requirement) {
+            if ($requirement['required'] && $requirement['key'] !== $doctorKey) {
+                ApplicationDocument::factory()->for($application)->create(['requirement_key' => $requirement['key']]);
+            }
+        }
+        $this->post($path.'/enviar', ['confirm' => true])->assertSessionHasErrors('application');
+        $file = new UploadedFile(database_path('fixtures/sustento-demo.pdf'), 'doctorado.pdf', 'application/pdf', null, true);
+        $this->post($path.'/documentos', ['file' => $file, 'requirement_key' => $doctorKey])->assertSessionHas('success');
+        $this->post($path.'/enviar', ['confirm' => true])->assertSessionHas('success');
+
+        $juror = User::factory()->create(['role' => 'jurado']);
+        $application->vacancy->jurors()->attach($juror);
+        $application->recruitmentCall->update(['status' => 'EN_EVALUACION']);
+        $verdicts = $application->documents()->get()->mapWithKeys(fn (ApplicationDocument $document): array => [
+            $document->id => $document->requirement_key === $doctorKey ? 'NO_CUMPLE' : 'CUMPLE',
+        ])->all();
+        $reviewPath = '/expedientes/'.$application->id;
+        $this->actingAs($juror)->post($reviewPath.'/aptitud', ['documents' => $verdicts, 'notes' => 'Revisión documental de prueba.'])->assertSessionHasErrors('academic_profile_confirmed');
+        $this->post($reviewPath.'/aptitud', ['documents' => $verdicts, 'notes' => 'Revisión documental de prueba.', 'academic_profile_confirmed' => true])->assertSessionHas('success');
+        $this->assertSame('APTO', $application->fresh()->status);
+        $this->get($reviewPath)->assertInertia(fn (Assert $page) => $page->where('screening.academic_points', 10)->where('verifiedScreening.academic_points', 8));
+    }
+
+    public function test_editing_a_credential_requires_a_new_sustaining_document(): void
+    {
+        Storage::fake('local');
+        $application = $this->application(['academic_credentials' => true, 'minimum_degree' => 'titulo', 'count_from_bachelor' => false]);
+        $credential = ['id' => (string) Str::uuid(), 'kind' => 'titulo', 'name' => 'Título de prueba', 'institution' => 'Universidad de prueba', 'awarded_at' => '2012-01-01'];
+        $data = [...$this->payload(), 'credentials' => [$credential]];
+        $path = '/mis-postulaciones/'.$application->id;
+        $this->actingAs($application->user)->put($path.'/formulario', $data)->assertSessionHas('success');
+        $file = new UploadedFile(database_path('fixtures/sustento-demo.pdf'), 'titulo.pdf', 'application/pdf', null, true);
+        $this->post($path.'/documentos', ['file' => $file, 'requirement_key' => 'acad_'.$credential['id']])->assertSessionHas('success');
+        $document = $application->documents()->sole();
+
+        $this->put($path.'/formulario', $data)->assertSessionHas('success');
+        $this->assertModelExists($document);
+        $data['credentials'][0]['institution'] = 'Otra universidad';
+        $this->put($path.'/formulario', $data)->assertSessionHas('success');
+        $this->assertModelMissing($document);
+        Storage::disk('local')->assertMissing($document->path);
+    }
+
     public function test_insufficient_experience_is_saved_but_blocks_documents_and_submission(): void
     {
         $application = $this->application();
@@ -171,8 +232,12 @@ class StructuredApplicationTest extends TestCase
         $manager = User::factory()->manager()->create();
         $rules = $this->rules();
         $rules['minimum_experience_months'] = 24;
+        $rules['academic_credentials'] = true;
+        $rules['allow_residency'] = false;
+        $rules['degree_points']['bachiller'] = 1;
         $this->actingAs($manager)->put('/gestion/plazas/'.$application->vacancy_id.'/formulario', ['screening_rules' => $rules])->assertSessionHas('success');
         $this->assertSame(24, $application->vacancy->fresh()->screening_rules['minimum_experience_months']);
+        $this->assertTrue($application->vacancy->fresh()->screening_rules['academic_credentials']);
         $application->recruitmentCall->update(['status' => 'PUBLICADA']);
         $this->put('/gestion/plazas/'.$application->vacancy_id.'/formulario', ['screening_rules' => $this->rules()])->assertConflict();
     }
@@ -230,7 +295,7 @@ class StructuredApplicationTest extends TestCase
         $this->travelTo('2026-11-02');
         $call = RecruitmentCall::factory()->create(['opens_at' => now()->addDay(), 'closes_at' => now()->addDays(2)]);
         $vacancy = Vacancy::factory()->for($call)->create();
-        $this->get('/')->assertInertia(fn (Assert $page) => $page->has('calls', 1)->has('vacancies.data', 0));
+        $this->get('/')->assertInertia(fn (Assert $page) => $page->has('vacancies.data', 1)->where('vacancies.data.0.id', $vacancy->id));
         $this->get('/convocatorias/'.$call->id)->assertOk();
         $this->actingAs(User::factory()->create())->post('/plazas/'.$vacancy->id.'/postular')->assertSessionHasErrors('application');
         $this->assertDatabaseCount('applications', 0);

@@ -1,10 +1,22 @@
 <script setup>
-import { computed } from "vue";
 import PublicLayout from "../Layouts/PublicLayout.vue";
 import Icon from "../Components/Icon.vue";
 import Badge from "../Components/Badge.vue";
 import { date } from "../lib/ui";
-const props = defineProps({ calls: Array });
+defineProps({ calls: Array });
+const referenceMode = "nombramiento_referencia";
+const outcomeLabels = {
+    NO_SUPERA_EXTERNA: "No supera el mínimo externo",
+    NO_SUPERA_INTERNA: "No supera el mínimo interno",
+    NO_SUPERA_TOTAL: "No supera el mínimo total",
+    SUPERA_MINIMOS: "Supera los mínimos",
+};
+function usesReferenceRubric(call, vacancy) {
+    return (vacancy.evaluation_mode ?? call.evaluation_mode) === referenceMode;
+}
+function scoreText(score) {
+    return score == null ? "—" : Number(score).toFixed(3);
+}
 function tied(rows, row) {
     return (
         row.score !== null &&
@@ -49,10 +61,7 @@ function tied(rows, row) {
                     >
                 </div>
                 <div v-if="c.is_demo" class="notice">
-                    Resultados de demostración, sin validez oficial. El puntaje
-                    es el promedio de las calificaciones de los jurados. No
-                    constituye adjudicación ni aplica los umbrales,
-                    bonificaciones o desempates de la normativa.
+                    Resultados de demostración, sin validez oficial.
                 </div>
                 <div
                     v-for="v in c.vacancies"
@@ -60,34 +69,71 @@ function tied(rows, row) {
                     class="form-section"
                 >
                     <h3>{{ v.school }} · AIRHSP {{ v.airhsp }}</h3>
+                    <p v-if="usesReferenceRubric(c, v)" class="muted">
+                        Los mínimos se verifican por bloque y en el total. La
+                        tabla muestra el resultado de la evaluación de
+                        referencia.
+                    </p>
+                    <p v-else-if="c.is_demo" class="muted">
+                        El puntaje corresponde al promedio de las calificaciones
+                        de los jurados.
+                    </p>
                     <div class="table-scroll">
                         <table>
                             <thead>
                                 <tr>
                                     <th>Código de expediente</th>
                                     <th>Estado</th>
-                                    <th>Puntaje promedio</th>
-                                    <th>Observación</th>
+                                    <template v-if="usesReferenceRubric(c, v)">
+                                        <th>Externa (55)</th>
+                                        <th>Interna (45)</th>
+                                        <th>Total (100)</th>
+                                        <th>Resultado</th>
+                                    </template>
+                                    <template v-else>
+                                        <th>Puntaje promedio</th>
+                                        <th>Observación</th>
+                                    </template>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr v-for="r in v.rows" :key="r.reference">
                                     <td class="mono">{{ r.reference }}</td>
                                     <td><Badge :value="r.status" /></td>
-                                    <td>
-                                        {{
-                                            r.score === null
-                                                ? "No corresponde"
-                                                : Number(r.score).toFixed(3)
-                                        }}
-                                    </td>
-                                    <td>
-                                        {{
-                                            tied(v.rows, r)
-                                                ? "Empate: requiere resolución de la comisión"
-                                                : "—"
-                                        }}
-                                    </td>
+                                    <template v-if="usesReferenceRubric(c, v)">
+                                        <td>
+                                            {{ scoreText(r.outcome?.external) }}
+                                        </td>
+                                        <td>
+                                            {{ scoreText(r.outcome?.internal) }}
+                                        </td>
+                                        <td>
+                                            {{ scoreText(r.outcome?.total) }}
+                                        </td>
+                                        <td>
+                                            {{
+                                                outcomeLabels[
+                                                    r.outcome?.stage
+                                                ] ?? "Sin calificación"
+                                            }}
+                                        </td>
+                                    </template>
+                                    <template v-else>
+                                        <td>
+                                            {{
+                                                r.score === null
+                                                    ? "No corresponde"
+                                                    : Number(r.score).toFixed(3)
+                                            }}
+                                        </td>
+                                        <td>
+                                            {{
+                                                tied(v.rows, r)
+                                                    ? "Empate: requiere resolución de la comisión"
+                                                    : "—"
+                                            }}
+                                        </td>
+                                    </template>
                                 </tr>
                             </tbody>
                         </table>

@@ -47,14 +47,18 @@ class ConfigureScreeningRequest extends FormRequest
         $required = 'required_if:screening_rules.enabled,true';
 
         return [
-            'screening_rules' => ['nullable', 'array:enabled,minimum_degree,minimum_experience_months,experience_type,count_from_bachelor,minimum_training_hours,degree_points,experience_points_per_year,experience_cap,training_hours_per_point,training_cap,fields'],
+            'screening_rules' => ['nullable', 'array:enabled,academic_credentials,allow_residency,minimum_degree,minimum_experience_months,experience_type,count_from_bachelor,minimum_training_hours,degree_points,experience_points_per_year,experience_cap,training_hours_per_point,training_cap,fields'],
             'screening_rules.enabled' => ['required_with:screening_rules', 'boolean'],
+            'screening_rules.academic_credentials' => ['sometimes', 'boolean'],
+            'screening_rules.allow_residency' => ['sometimes', 'boolean'],
             'screening_rules.minimum_degree' => [$required, Rule::in(['titulo', 'maestro', 'doctor'])],
             'screening_rules.minimum_experience_months' => [$required, 'integer', 'between:0,600'],
             'screening_rules.experience_type' => [$required, Rule::in(['toda', 'profesional', 'docente'])],
             'screening_rules.count_from_bachelor' => [$required, 'boolean'],
             'screening_rules.minimum_training_hours' => [$required, 'integer', 'between:0,10000'],
-            'screening_rules.degree_points' => [$required, 'array:titulo,maestro,doctor'],
+            'screening_rules.degree_points' => [$required, 'array:titulo,bachiller,maestro,doctor,segunda_especialidad'],
+            'screening_rules.degree_points.bachiller' => ['sometimes', 'numeric', 'between:0,10'],
+            'screening_rules.degree_points.segunda_especialidad' => ['sometimes', 'numeric', 'between:0,10'],
             'screening_rules.degree_points.titulo' => [$required, 'numeric', 'between:0,100'],
             'screening_rules.degree_points.maestro' => [$required, 'numeric', 'between:0,100'],
             'screening_rules.degree_points.doctor' => [$required, 'numeric', 'between:0,100'],

@@ -1,9 +1,15 @@
 <script setup>
-import { Head, Link, useForm } from "@inertiajs/vue3";
+import { onUnmounted, ref, watch } from "vue";
+import { Head, Link, useForm, useHttp } from "@inertiajs/vue3";
 import Icon from "../Components/Icon.vue";
 import Errors from "../Components/Errors.vue";
 import { url } from "../lib/ui";
-const props = defineProps({ mode: String, token: String, email: String });
+const props = defineProps({
+    mode: String,
+    token: String,
+    email: String,
+    dniLookupEnabled: Boolean,
+});
 const form = useForm({
     name: "",
     document_number: "",
@@ -14,6 +20,71 @@ const form = useForm({
     remember: false,
     consent: false,
     token: props.token || "",
+});
+const dniLookup = useHttp({ dni: "", consent: false });
+const dniMessage = ref("");
+let timer;
+let attemptedDni = "";
+let suggestedName = "";
+
+async function fillNameFromDni() {
+    const dni = form.document_number;
+    if (
+        props.mode !== "register" ||
+        !props.dniLookupEnabled ||
+        !dniLookup.consent ||
+        !/^[0-9]{8}$/.test(dni) ||
+        dniLookup.processing ||
+        attemptedDni === dni
+    )
+        return;
+
+    attemptedDni = dni;
+    dniLookup.dni = dni;
+    const currentName = form.name;
+    try {
+        const result = await dniLookup.post(url("/registro/consultar-dni"));
+        if (form.document_number !== dni || !dniLookup.consent) return;
+        if (result.status === "found" && form.name === currentName) {
+            form.name = suggestedName = result.name;
+            dniMessage.value =
+                "Nombre completado. Revísalo antes de crear tu cuenta.";
+        } else {
+            dniMessage.value =
+                result.status === "found"
+                    ? "La consulta respondió. Conservamos el nombre que estás editando."
+                    : "No se pudo autocompletar el nombre. Puedes escribirlo manualmente.";
+        }
+    } catch {
+        if (form.document_number === dni) {
+            dniMessage.value =
+                "No se pudo autocompletar el nombre. Puedes escribirlo manualmente.";
+        }
+    }
+}
+
+watch(
+    () => form.document_number,
+    () => {
+        if (suggestedName && form.name === suggestedName) form.name = "";
+        suggestedName = "";
+        dniMessage.value = "";
+    },
+);
+watch(
+    [
+        () => form.document_number,
+        () => dniLookup.consent,
+        () => dniLookup.processing,
+    ],
+    () => {
+        clearTimeout(timer);
+        if (!dniLookup.processing) timer = setTimeout(fillNameFromDni, 400);
+    },
+);
+onUnmounted(() => {
+    clearTimeout(timer);
+    dniLookup.cancel();
 });
 const titles = {
     login: "Bienvenido de nuevo",
@@ -91,25 +162,49 @@ function demo(role) {
                 </div>
                 <Errors :errors="form.errors" />
                 <form @submit.prevent="submit">
-                    <template v-if="mode === 'register'"
-                        ><label
-                            >Nombres y apellidos<input
-                                v-model="form.name"
+                    <template v-if="mode === 'register'">
+                        <label>
+                            DNI<input
+                                v-model="form.document_number"
                                 required
-                                maxlength="150"
-                                autocomplete="name"
-                                placeholder="Como aparecen en tu DNI"
-                        /></label>
+                                inputmode="numeric"
+                                pattern="[0-9]{8}"
+                                maxlength="8"
+                                placeholder="8 dígitos"
+                            />
+                        </label>
+                        <label v-if="dniLookupEnabled" class="check-label">
+                            <input
+                                v-model="dniLookup.consent"
+                                type="checkbox"
+                            />
+                            Autorizo consultar mi DNI en APIs Perú para
+                            completar mi nombre.
+                        </label>
+                        <p
+                            v-if="
+                                dniLookupEnabled &&
+                                (dniLookup.processing || dniMessage)
+                            "
+                            class="muted"
+                            aria-live="polite"
+                        >
+                            {{
+                                dniLookup.processing
+                                    ? "Consultando DNI…"
+                                    : dniMessage
+                            }}
+                        </p>
                         <div class="form-grid">
                             <label
-                                >DNI<input
-                                    v-model="form.document_number"
+                                >Nombres y apellidos<input
+                                    v-model="form.name"
                                     required
-                                    inputmode="numeric"
-                                    pattern="[0-9]{8}"
-                                    maxlength="8"
-                                    placeholder="8 dígitos" /></label
-                            ><label
+                                    maxlength="150"
+                                    autocomplete="name"
+                                    placeholder="Como aparecen en tu DNI"
+                            /></label>
+                            <label
                                 >Teléfono<input
                                     v-model="form.phone"
                                     required

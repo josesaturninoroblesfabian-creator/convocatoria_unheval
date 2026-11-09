@@ -1,30 +1,70 @@
 <script setup>
+import { computed } from "vue";
 import { useForm } from "@inertiajs/vue3";
+import AcademicCredentialFields from "./AcademicCredentialFields.vue";
 import Errors from "./Errors.vue";
 import Icon from "./Icon.vue";
 import ScreeningSummary from "./ScreeningSummary.vue";
 import { url } from "../lib/ui";
+import {
+    academicCredentialLabels,
+    academicCredentialLimit,
+    screeningRecordId,
+} from "../lib/screening";
 const props = defineProps({
     application: Object,
     report: Object,
     editable: Boolean,
+    profileCredentials: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["continue"]);
 const initial = props.application.form_data || {};
+const usesCredentials = computed(
+    () => !!props.report?.rules?.academic_credentials,
+);
+const usesAppointmentTemplate = computed(
+    () =>
+        props.application.recruitment_call.evaluation_mode ===
+        "nombramiento_referencia",
+);
 const form = useForm({
     statement: props.application.statement || "",
     consent: !!props.application.consented_at,
-    degree: initial.degree || "",
-    professional_title: initial.professional_title || "",
-    bachelor_date: initial.bachelor_date || "",
+    ...(usesCredentials.value
+        ? { credentials: initial.credentials || [] }
+        : {
+              degree: initial.degree || "",
+              professional_title: initial.professional_title || "",
+              bachelor_date: initial.bachelor_date || "",
+          }),
     experience: initial.experience || [],
     training: initial.training || [],
     answers: initial.answers || {},
 });
-const uid = () => crypto.randomUUID();
+function credentialKey(credential) {
+    return JSON.stringify(
+        [
+            credential.kind,
+            credential.name,
+            credential.institution,
+            credential.awarded_at,
+        ].map((value) => value.trim().toLowerCase()),
+    );
+}
+const availableCredentials = computed(() => {
+    const existing = new Set((form.credentials ?? []).map(credentialKey));
+    return props.profileCredentials.filter(
+        (credential) =>
+            credential.awarded_at <= props.report.cutoff &&
+            !existing.has(credentialKey(credential)),
+    );
+});
+function copyCredential(credential) {
+    form.credentials.push({ ...credential, id: screeningRecordId() });
+}
 function experience() {
     form.experience.push({
-        id: uid(),
+        id: screeningRecordId(),
         institution: "",
         position: "",
         type: "profesional",
@@ -34,7 +74,7 @@ function experience() {
 }
 function training() {
     form.training.push({
-        id: uid(),
+        id: screeningRecordId(),
         name: "",
         institution: "",
         date: "",
@@ -60,15 +100,40 @@ function example(years) {
     const end = props.report.cutoff;
     const start = new Date(end + "T12:00:00Z");
     start.setUTCFullYear(start.getUTCFullYear() - years);
-    form.degree = "maestro";
-    form.professional_title =
+    const professionalTitle =
         props.application.vacancy.airhsp === "000206"
             ? "Licenciado en Turismo y Hotelería"
             : "Licenciado en Educación, especialidad Biología y Química";
-    form.bachelor_date = "2015-01-01";
+    if (usesCredentials.value) {
+        form.credentials = [
+            {
+                kind: "bachiller",
+                name: "Bachiller de ejemplo",
+                awarded_at: "2015-01-01",
+            },
+            {
+                kind: "titulo",
+                name: professionalTitle,
+                awarded_at: "2016-01-01",
+            },
+            {
+                kind: "maestro",
+                name: "Maestría de ejemplo",
+                awarded_at: "2020-01-01",
+            },
+        ].map((credential) => ({
+            ...credential,
+            id: screeningRecordId(),
+            institution: "Universidad de ejemplo",
+        }));
+    } else {
+        form.degree = "maestro";
+        form.professional_title = professionalTitle;
+        form.bachelor_date = "2015-01-01";
+    }
     form.experience = [
         {
-            id: uid(),
+            id: screeningRecordId(),
             institution: "Institución de ejemplo",
             position: "Docente de prueba",
             type: "docente",
@@ -78,7 +143,7 @@ function example(years) {
     ];
     form.training = [
         {
-            id: uid(),
+            id: screeningRecordId(),
             name: "Capacitación de ejemplo",
             institution: "Centro de formación de prueba",
             date: end,
@@ -95,7 +160,7 @@ function example(years) {
         </div>
         <p class="muted">
             Registra información verificable. Primero comprobaremos los mínimos;
-            después adjuntarás el sustento de cada experiencia y capacitación.
+            después adjuntarás el sustento de lo declarado.
         </p>
         <div v-if="$page.props.demo && editable" class="demo-notice row wrap">
             <span>Casos ficticios para la demostración:</span
@@ -114,9 +179,66 @@ function example(years) {
             </button>
         </div>
         <Errors :errors="form.errors" />
-        <form @submit.prevent="save()">
+        <form @submit.prevent="save($event.submitter?.value === 'documents')">
             <fieldset :disabled="!editable || form.processing">
-                <div class="form-grid">
+                <template v-if="usesCredentials">
+                    <h3>Formación profesional</h3>
+                    <p class="footnote">
+                        Registra por separado tus títulos, grados y segundas
+                        especialidades. Para el puntaje se considera un título
+                        profesional y el mayor puntaje de un grado admitido por
+                        las bases. Adjuntarás un PDF por credencial en el
+                        siguiente paso.
+                    </p>
+                    <details
+                        v-if="profileCredentials.length"
+                        class="entry-card"
+                    >
+                        <summary>Copiar credenciales de mi perfil</summary>
+                        <p class="muted">
+                            Elige las credenciales que quieras declarar en esta
+                            plaza. Después deberás adjuntar sus sustentos.
+                        </p>
+                        <p v-if="!availableCredentials.length" class="muted">
+                            No hay credenciales adicionales disponibles para
+                            copiar.
+                        </p>
+                        <div
+                            v-for="credential in availableCredentials"
+                            :key="credential.id"
+                            class="row between wrap"
+                        >
+                            <div>
+                                <b>{{ credential.name }}</b>
+                                <p class="muted">
+                                    {{
+                                        academicCredentialLabels[
+                                            credential.kind
+                                        ]
+                                    }}
+                                    · {{ credential.institution }}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                class="btn btn-outline btn-sm"
+                                :disabled="
+                                    form.credentials.length >=
+                                    academicCredentialLimit
+                                "
+                                :aria-label="'Copiar ' + credential.name"
+                                @click="copyCredential(credential)"
+                            >
+                                Copiar
+                            </button>
+                        </div>
+                    </details>
+                    <AcademicCredentialFields
+                        v-model="form.credentials"
+                        :date-limit="report.cutoff"
+                    />
+                </template>
+                <div v-else class="form-grid">
                     <label
                         >Título profesional que posees<input
                             v-model="form.professional_title"
@@ -136,7 +258,7 @@ function example(years) {
                             :max="report.cutoff"
                     /></label>
                 </div>
-                <h3>Experiencia profesional y docente</h3>
+                <h3 class="form-section">Experiencia profesional y docente</h3>
                 <p class="footnote">
                     Los periodos superpuestos se cuentan una sola vez. Deja la
                     fecha de fin vacía si continúas en el puesto. El cálculo se
@@ -298,10 +420,10 @@ function example(years) {
                 <button class="btn btn-outline" :disabled="form.processing">
                     Guardar y calcular</button
                 ><button
-                    type="button"
+                    type="submit"
+                    value="documents"
                     class="btn btn-primary"
                     :disabled="form.processing"
-                    @click="save(true)"
                 >
                     Comprobar y pasar a documentos<Icon
                         name="ArrowRight"
@@ -310,7 +432,14 @@ function example(years) {
                 </button>
             </div>
         </form>
-        <ScreeningSummary :report="report" />
+        <ScreeningSummary
+            :report="report"
+            :show-points="!usesAppointmentTemplate"
+        />
+        <p v-if="usesAppointmentTemplate" class="footnote">
+            La comisión revisará los sustentos y calificará los rubros externos
+            e internos según la plantilla de evaluación de esta convocatoria.
+        </p>
         <p v-if="form.isDirty" class="notice">
             Hay cambios sin calcular. Guarda el formulario para actualizar el
             resultado antes de continuar.

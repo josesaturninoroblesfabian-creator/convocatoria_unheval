@@ -1,5 +1,27 @@
 <script setup>
+import { computed } from "vue";
+import { additionalAcademicPoints } from "../lib/screening";
+
 const model = defineModel({ required: true });
+const pointLabels = computed(() => ({
+    titulo: "Puntos por título profesional",
+    ...(model.value.academic_credentials
+        ? { bachiller: "Puntos por bachiller" }
+        : {}),
+    maestro: "Puntos por maestro",
+    doctor: "Puntos por doctor",
+    ...(model.value.academic_credentials && model.value.allow_residency
+        ? { segunda_especialidad: "Puntos por segunda especialidad admitida" }
+        : {}),
+}));
+function initializeAcademicPoints() {
+    if (model.value.academic_credentials) {
+        model.value.degree_points = {
+            ...additionalAcademicPoints,
+            ...model.value.degree_points,
+        };
+    }
+}
 function addField() {
     model.value.fields.push({
         key: "campo_" + (model.value.fields.length + 1),
@@ -23,6 +45,19 @@ function addField() {
                 bloquearán al publicar. Los puntajes son preliminares y
                 requieren validación documental.
             </div>
+            <label class="check-label">
+                <input
+                    type="checkbox"
+                    v-model="model.academic_credentials"
+                    @change="initializeAcademicPoints"
+                />
+                Registrar grados y títulos por separado
+            </label>
+            <label v-if="model.academic_credentials" class="check-label">
+                <input type="checkbox" v-model="model.allow_residency" />
+                Admitir la segunda especialidad obtenida por residentado médico
+                u odontológico, según las bases
+            </label>
             <div class="form-grid">
                 <label
                     >Grado mínimo<select v-model="model.minimum_degree">
@@ -63,13 +98,7 @@ function addField() {
             >
             <h3 class="form-section">Puntajes preliminares configurables</h3>
             <div class="form-grid">
-                <label
-                    v-for="(title, key) in {
-                        titulo: 'Puntos por título',
-                        maestro: 'Puntos por maestro',
-                        doctor: 'Puntos por doctor',
-                    }"
-                    :key="key"
+                <label v-for="(title, key) in pointLabels" :key="key"
                     >{{ title
                     }}<input
                         v-model.number="model.degree_points[key]"
@@ -111,7 +140,12 @@ function addField() {
                         required
                 /></label>
             </div>
-            <p class="footnote">
+            <p v-if="model.academic_credentials" class="footnote">
+                Formación profesional: un título y el mayor puntaje de un grado
+                admitido, hasta 10 puntos. Se suman periodos sin superposición y
+                horas de los cursos declarados.
+            </p>
+            <p v-else class="footnote">
                 Solo puntúa el grado seleccionado; no se acumulan maestro y
                 doctor. Se suman periodos sin superposición y horas de los
                 cursos declarados.

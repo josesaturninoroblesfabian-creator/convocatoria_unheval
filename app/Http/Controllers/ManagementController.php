@@ -5,11 +5,14 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ConfigureScreeningRequest;
 use App\Http\Requests\StoreCallRequest;
 use App\Http\Requests\StoreVacancyRequest;
+use App\Http\Requests\UpdateAcademicProfileRequest;
 use App\Models\Application;
 use App\Models\AuditEvent;
 use App\Models\RecruitmentCall;
 use App\Models\User;
 use App\Models\Vacancy;
+use App\Services\NombramientoRubric;
+use App\Services\ProfileRegistryLookup;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -59,13 +62,13 @@ class ManagementController extends Controller
 
     public function create(): Response
     {
-        return Inertia::render('CallForm', ['call' => null]);
+        return Inertia::render('CallForm', ['call' => null, 'nombramientoTemplate' => NombramientoRubric::template()]);
     }
 
     public function store(StoreCallRequest $request): RedirectResponse
     {
         $call = DB::transaction(function () use ($request) {
-            $call = RecruitmentCall::create($request->validated());
+            $call = RecruitmentCall::create($request->callData());
             AuditEvent::record('CONVOCATORIA_CREADA', $call);
 
             return $call;
@@ -83,7 +86,7 @@ class ManagementController extends Controller
     {
         abort_unless($recruitmentCall->status === 'BORRADOR', 409);
 
-        return Inertia::render('CallForm', ['call' => $recruitmentCall]);
+        return Inertia::render('CallForm', ['call' => $recruitmentCall, 'nombramientoTemplate' => $recruitmentCall->evaluation_template ?? NombramientoRubric::template()]);
     }
 
     public function update(StoreCallRequest $request, RecruitmentCall $recruitmentCall): RedirectResponse
@@ -91,7 +94,7 @@ class ManagementController extends Controller
         DB::transaction(function () use ($request, $recruitmentCall) {
             $call = RecruitmentCall::lockForUpdate()->findOrFail($recruitmentCall->id);
             abort_unless($call->status === 'BORRADOR', 409);
-            $call->update([...$request->validated(), 'rules_approved' => false]);
+            $call->update([...$request->callData($call->evaluation_template), 'rules_approved' => false]);
             AuditEvent::record('CONVOCATORIA_EDITADA', $call);
         });
 
@@ -129,6 +132,9 @@ class ManagementController extends Controller
             $call = RecruitmentCall::lockForUpdate()->findOrFail($vacancy->recruitment_call_id);
             abort_unless(in_array($call->status, ['BORRADOR', 'PUBLICADA'], true), 409);
             abort_if($call->applications()->whereNotNull('submitted_at')->exists(), 409, 'La comisión no se puede cambiar después de recibir expedientes.');
+            if ($call->evaluation_template && $call->status === 'PUBLICADA' && count($data['jurors']) !== 3) {
+                throw ValidationException::withMessages(['jurors' => 'Esta convocatoria requiere tres jurados titulares por plaza.']);
+            }
             $vacancy->jurors()->sync($data['jurors']);
             AuditEvent::record('JURADO_ASIGNADO', $vacancy, ['jurors' => $data['jurors']]);
         });
@@ -165,6 +171,9 @@ class ManagementController extends Controller
                 if (! $call->vacancies()->exists() || $call->vacancies()->doesntHave('jurors')->exists()) {
                     throw ValidationException::withMessages(['status' => 'Añade al menos una plaza y asigna jurados a todas las plazas.']);
                 }
+                if ($call->evaluation_template && $call->vacancies()->has('jurors', '!=', 3)->exists()) {
+                    throw ValidationException::withMessages(['status' => 'Asigna tres jurados titulares a cada plaza para probar la plantilla de nombramiento.']);
+                }
                 if ($call->closes_at->isPast()) {
                     throw ValidationException::withMessages(['status' => 'La fecha de cierre ya pasó. Edita el cronograma antes de publicar.']);
                 }
@@ -189,10 +198,21 @@ class ManagementController extends Controller
 
     public function applications(Request $request): Response
     {
-        $filters = $request->validate(['q' => ['nullable', 'string', 'max:120'], 'status' => ['nullable', Rule::in(['RECIBIDA', 'APTO', 'NO_APTO', 'EVALUADA'])], 'sort' => ['nullable', Rule::in(['score', 'recent'])]]);
+        $filters = $request->validate([
+            'q' => ['nullable', 'string', 'max:120'],
+            'call' => ['nullable', 'integer', 'min:1'],
+            'status' => ['nullable', Rule::in(['RECIBIDA', 'APTO', 'NO_APTO', 'EVALUADA'])],
+            'sort' => ['nullable', Rule::in(['score', 'recent'])],
+        ]);
+        $user = $request->user();
         $query = Application::whereNotNull('submitted_at')->with('user:id,name,email', 'vacancy', 'recruitmentCall');
-        if ($request->user()->role === 'jurado') {
-            $query->whereHas('vacancy.jurors', fn ($q) => $q->where('users.id', $request->user()->id));
+        $calls = RecruitmentCall::where('status', '!=', 'BORRADOR');
+        if ($user->role === 'jurado') {
+            $query->whereHas('vacancy.jurors', fn ($q) => $q->where('users.id', $user->id));
+            $calls->whereHas('vacancies.jurors', fn ($q) => $q->where('users.id', $user->id));
+        }
+        if (! empty($filters['call'])) {
+            $query->where('recruitment_call_id', $filters['call']);
         }
         if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
@@ -206,7 +226,11 @@ class ManagementController extends Controller
             $query->orderByDesc('declared_score');
         }
 
-        return Inertia::render('ReviewList', ['applications' => $query->latest('submitted_at')->orderByDesc('id')->paginate(15)->withQueryString(), 'filters' => $filters]);
+        return Inertia::render('ReviewList', [
+            'applications' => $query->latest('submitted_at')->orderByDesc('id')->paginate(15)->withQueryString(),
+            'calls' => $calls->latest('id')->get(['id', 'code', 'title']),
+            'filters' => $filters,
+        ]);
     }
 
     public function users(): Response
@@ -231,9 +255,22 @@ class ManagementController extends Controller
         return Inertia::render('Audit', ['events' => AuditEvent::latest()->paginate(30)]);
     }
 
-    public function profile(): Response
+    public function profile(Request $request, ProfileRegistryLookup $registry): Response
     {
-        return Inertia::render('Profile');
+        return Inertia::render('Profile', [
+            'registrySources' => $registry->sources($request),
+            'academicCredentials' => $request->user()->role === 'postulante'
+                ? ($request->user()->academic_credentials ?? [])
+                : null,
+            'credentialDateLimit' => now()->toDateString(),
+        ]);
+    }
+
+    public function updateAcademicProfile(UpdateAcademicProfileRequest $request): RedirectResponse
+    {
+        $request->user()->update(['academic_credentials' => $request->validated('credentials')]);
+
+        return back()->with('success', 'Formación guardada en tu perfil. Puedes copiarla a una postulación en borrador.');
     }
 
     public function updateProfile(Request $request): RedirectResponse

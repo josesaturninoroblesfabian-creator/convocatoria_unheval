@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\RegisterRequest;
 use App\Models\User;
+use App\Services\ProfileRegistryLookup;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -21,9 +23,17 @@ class AuthController extends Controller
         return Inertia::render('Auth', ['mode' => 'login']);
     }
 
-    public function register(): Response
+    public function register(Request $request, ProfileRegistryLookup $registry): Response
     {
-        return Inertia::render('Auth', ['mode' => 'register']);
+        return Inertia::render('Auth', ['mode' => 'register', 'dniLookupEnabled' => $registry->canLookUpDni($request)]);
+    }
+
+    public function lookupRegistrationDni(Request $request, ProfileRegistryLookup $registry): JsonResponse
+    {
+        abort_unless($registry->canLookUpDni($request), 404);
+        $data = $request->validate(['dni' => ['required', 'string', 'regex:/^[0-9]{8}$/D'], 'consent' => ['accepted']]);
+
+        return response()->json($registry->lookup('dni', $data['dni']))->header('Cache-Control', 'no-store');
     }
 
     public function authenticate(Request $request): RedirectResponse

@@ -5,6 +5,11 @@ import Badge from "../Components/Badge.vue";
 import Icon from "../Components/Icon.vue";
 import { url, date } from "../lib/ui";
 defineProps({ calls: Array });
+const actionLabels = {
+    BORRADOR: "Preparar convocatoria",
+    PUBLICADA: "Ver inscripción",
+    EN_EVALUACION: "Gestionar evaluación",
+};
 </script>
 <template>
     <AppLayout
@@ -35,11 +40,11 @@ defineProps({ calls: Array });
                     }}</span>
                 </div>
                 <div class="row between card-bottom">
-                    <small>Cierre: {{ date(c.closes_at) }}</small
+                    <small>Cierre de inscripción: {{ date(c.closes_at) }}</small
                     ><Link
                         :href="url('/gestion/convocatorias/' + c.id)"
                         class="text-link"
-                        >Administrar <Icon name="ArrowRight" :size="17"
+                        >{{ actionLabels[c.status] || "Ver convocatoria" }} <Icon name="ArrowRight" :size="17"
                     /></Link>
                 </div>
             </article>

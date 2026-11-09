@@ -100,6 +100,11 @@ function saveJury() {
                 :href="url('/gestion/convocatorias/' + call.id + '/editar')"
                 class="btn btn-outline"
                 ><Icon name="Settings2" :size="17" />Editar configuración</Link
+            ><Link
+                v-else-if="['PUBLICADA', 'EN_EVALUACION'].includes(call.status)"
+                :href="url('/expedientes?call=' + call.id + '&sort=recent')"
+                class="btn btn-outline"
+                ><Icon name="FolderOpen" :size="17" />Ver expedientes de esta convocatoria</Link
             ></template
         ><Errors
             :errors="{

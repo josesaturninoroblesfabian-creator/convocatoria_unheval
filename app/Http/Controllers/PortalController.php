@@ -16,34 +16,19 @@ class PortalController extends Controller
         $query = Vacancy::query()->with('recruitmentCall')->whereHas('recruitmentCall', fn ($q) => $q->where('status', '!=', 'BORRADOR'));
         if (! empty($filters['q'])) {
             $term = $filters['q'];
-            $query->where(fn ($q) => $q->where('school', 'like', "%{$term}%")->orWhere('airhsp', 'like', "%{$term}%")->orWhere('faculty', 'like', "%{$term}%"));
+            $query->where(fn ($q) => $q->where('school', 'like', "%{$term}%")->orWhere('airhsp', 'like', "%{$term}%")->orWhere('faculty', 'like', "%{$term}%")->orWhereHas('recruitmentCall', fn ($call) => $call->where('title', 'like', "%{$term}%")->orWhere('code', 'like', "%{$term}%")));
         }
         if (! empty($filters['faculty'])) {
             $query->where('faculty', $filters['faculty']);
         }
         if (($filters['status'] ?? 'abiertas') === 'abiertas') {
-            $query->whereHas('recruitmentCall', fn ($q) => $q->where('status', 'PUBLICADA')->where('opens_at', '<=', now())->where('closes_at', '>=', now()));
+            $query->whereHas('recruitmentCall', fn ($q) => $q->where('status', 'PUBLICADA')->where('closes_at', '>=', now()));
         }
         if (($filters['status'] ?? 'abiertas') === 'cerradas') {
             $query->whereHas('recruitmentCall', fn ($q) => $q->where(fn ($q) => $q->where('closes_at', '<', now())->orWhereIn('status', ['EN_EVALUACION', 'FINALIZADA', 'ARCHIVADA'])));
         }
 
-        $calls = RecruitmentCall::where('status', '!=', 'BORRADOR')->with('vacancies')->withCount('vacancies');
-        if (! empty($filters['faculty'])) {
-            $calls->whereHas('vacancies', fn ($query) => $query->where('faculty', $filters['faculty']));
-        }
-        if (! empty($filters['q'])) {
-            $term = $filters['q'];
-            $calls->where(fn ($query) => $query->where('title', 'like', "%{$term}%")->orWhere('code', 'like', "%{$term}%")->orWhereHas('vacancies', fn ($query) => $query->where('school', 'like', "%{$term}%")->orWhere('airhsp', 'like', "%{$term}%")));
-        }
-        if (($filters['status'] ?? 'abiertas') === 'abiertas') {
-            $calls->where('status', 'PUBLICADA')->where('closes_at', '>=', now());
-        }
-        if (($filters['status'] ?? 'abiertas') === 'cerradas') {
-            $calls->where(fn ($query) => $query->where('closes_at', '<', now())->orWhereIn('status', ['EN_EVALUACION', 'FINALIZADA', 'ARCHIVADA']));
-        }
-
-        return Inertia::render('Portal', ['vacancies' => $query->orderByDesc('id')->paginate(8)->withQueryString(), 'filters' => $filters, 'faculties' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', '!=', 'BORRADOR'))->distinct()->orderBy('faculty')->pluck('faculty'), 'calls' => $calls->orderByDesc('id')->get(), 'stats' => ['open' => RecruitmentCall::where('status', 'PUBLICADA')->where('opens_at', '<=', now())->where('closes_at', '>=', now())->count(), 'vacancies' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', 'PUBLICADA')->where('opens_at', '<=', now())->where('closes_at', '>=', now()))->count(), 'faculties' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', '!=', 'BORRADOR'))->distinct()->count('faculty')]]);
+        return Inertia::render('Portal', ['vacancies' => $query->orderByDesc('id')->paginate(8)->withQueryString(), 'filters' => $filters, 'faculties' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', '!=', 'BORRADOR'))->distinct()->orderBy('faculty')->pluck('faculty'), 'stats' => ['open' => RecruitmentCall::where('status', 'PUBLICADA')->where('opens_at', '<=', now())->where('closes_at', '>=', now())->count(), 'vacancies' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', 'PUBLICADA')->where('opens_at', '<=', now())->where('closes_at', '>=', now()))->count(), 'faculties' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', '!=', 'BORRADOR'))->distinct()->count('faculty')]]);
     }
 
     public function show(Vacancy $vacancy): Response
@@ -64,7 +49,25 @@ class PortalController extends Controller
     public function results(): Response
     {
         $calls = RecruitmentCall::whereNotNull('results_published_at')->whereIn('status', ['FINALIZADA', 'ARCHIVADA'])->with(['vacancies.applications' => fn ($q) => $q->whereNotNull('submitted_at')->with('evaluations')])->get();
-        $data = $calls->map(fn ($call) => ['id' => $call->id, 'title' => $call->title, 'is_demo' => $call->is_demo, 'published_at' => $call->results_published_at, 'vacancies' => $call->vacancies->map(fn ($v) => ['school' => $v->school, 'airhsp' => $v->airhsp, 'rows' => $v->applications->map(fn ($a) => ['reference' => $a->reference, 'status' => $a->status, 'score' => $a->status === 'EVALUADA' ? round((float) $a->evaluations->avg('total'), 3) : null])->sortByDesc('score')->values()])]);
+        $data = $calls->map(fn ($call) => [
+            'id' => $call->id,
+            'title' => $call->title,
+            'is_demo' => $call->is_demo,
+            'evaluation_mode' => $call->evaluation_mode,
+            'published_at' => $call->results_published_at,
+            'vacancies' => $call->vacancies->map(fn ($vacancy) => [
+                'school' => $vacancy->school,
+                'airhsp' => $vacancy->airhsp,
+                'rows' => $vacancy->applications->map(fn ($application) => [
+                    'reference' => $application->reference,
+                    'status' => $application->status,
+                    'outcome' => $application->evaluation_outcome,
+                    'score' => $call->evaluation_template
+                        ? ($application->evaluation_outcome['total'] ?? null)
+                        : ($application->status === 'EVALUADA' ? round((float) $application->evaluations->avg('total'), 3) : null),
+                ])->sortByDesc('score')->values(),
+            ]),
+        ]);
 
         return Inertia::render('Results', ['calls' => $data]);
     }

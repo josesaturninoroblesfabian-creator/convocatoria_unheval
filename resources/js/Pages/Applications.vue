@@ -4,7 +4,9 @@ import AppLayout from "../Layouts/AppLayout.vue";
 import Badge from "../Components/Badge.vue";
 import Icon from "../Components/Icon.vue";
 import { url, date, shortRef } from "../lib/ui";
+import { useApplicationWindow } from "../lib/useApplicationWindow";
 defineProps({ applications: Array });
+const isOpen = useApplicationWindow();
 </script>
 <template>
     <AppLayout
@@ -17,11 +19,8 @@ defineProps({ applications: Array });
         <section class="panel">
             <div v-if="!applications.length" class="empty-state">
                 <Icon name="FolderOpen" :size="42" />
-                <h3>Tu próxima oportunidad te espera</h3>
-                <p>Elige una plaza e inicia tu primer expediente.</p>
-                <Link :href="url('/')" class="btn btn-primary"
-                    >Ver convocatorias</Link
-                >
+                <h3>Aún no tienes postulaciones</h3>
+                <p>En Explorar plazas puedes consultar el perfil de cada plaza e iniciar un expediente.</p>
             </div>
             <Link
                 v-for="a in applications"
@@ -44,7 +43,13 @@ defineProps({ applications: Array });
                         }}</small
                     >
                 </div>
-                <Badge :value="a.status" /><Icon name="ChevronRight"
-            /></Link></section
+                <Badge :value="a.status" />
+                <span class="text-link">
+                    {{ a.status === "BORRADOR" && isOpen(a.recruitment_call)
+                        ? "Continuar borrador"
+                        : "Ver expediente" }}
+                    <Icon name="ChevronRight" :size="16" />
+                </span>
+            </Link></section
     ></AppLayout>
 </template>

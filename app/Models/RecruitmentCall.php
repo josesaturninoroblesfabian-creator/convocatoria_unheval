@@ -7,16 +7,23 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['code', 'title', 'description', 'modality', 'status', 'is_demo', 'rules_approved', 'resolution', 'opens_at', 'closes_at', 'schedule', 'rubric', 'public_documents', 'results_published_at'])]
+#[Fillable(['code', 'title', 'description', 'modality', 'status', 'is_demo', 'rules_approved', 'resolution', 'opens_at', 'closes_at', 'schedule', 'rubric', 'public_documents', 'results_published_at', 'evaluation_template'])]
 class RecruitmentCall extends Model
 {
     use HasFactory;
 
-    protected $appends = ['accepting_applications'];
+    protected $appends = ['accepting_applications', 'evaluation_mode'];
+
+    protected $hidden = ['evaluation_template'];
+
+    public function getEvaluationModeAttribute(): ?string
+    {
+        return $this->evaluation_template ? 'nombramiento_referencia' : null;
+    }
 
     protected function casts(): array
     {
-        return ['opens_at' => 'datetime', 'closes_at' => 'datetime', 'schedule' => 'array', 'rubric' => 'array', 'public_documents' => 'array', 'is_demo' => 'boolean', 'rules_approved' => 'boolean', 'results_published_at' => 'datetime'];
+        return ['opens_at' => 'datetime', 'closes_at' => 'datetime', 'schedule' => 'array', 'rubric' => 'array', 'public_documents' => 'array', 'is_demo' => 'boolean', 'rules_approved' => 'boolean', 'results_published_at' => 'datetime', 'evaluation_template' => 'array'];
     }
 
     public function getAcceptingApplicationsAttribute(): bool

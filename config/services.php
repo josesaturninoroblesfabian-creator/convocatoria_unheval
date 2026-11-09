@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'profile_registry' => [
+        'enabled' => env('PROFILE_REGISTRY_LOOKUP_ENABLED', false),
+        'apisperu_token' => env('APISPERU_DNI_TOKEN'),
+        'apisted_token' => env('APISTED_TOKEN'),
+    ],
+
 ];

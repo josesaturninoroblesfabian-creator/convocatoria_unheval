@@ -69,7 +69,7 @@ class RecruitmentWorkflowTest extends TestCase
     {
         $call = RecruitmentCall::factory()->draft()->create();
         $vacancy = Vacancy::factory()->for($call)->create();
-        $this->get('/?status=todas')->assertInertia(fn (Assert $page) => $page->component('Portal')->has('vacancies.data', 0)->has('calls', 0));
+        $this->get('/?status=todas')->assertInertia(fn (Assert $page) => $page->component('Portal')->has('vacancies.data', 0));
         $this->get('/plazas/'.$vacancy->id)->assertNotFound();
     }
 
@@ -334,8 +334,8 @@ class RecruitmentWorkflowTest extends TestCase
         $app = Application::factory()->create();
         ApplicationDocument::factory()->for($app)->create();
         Notification::fake();
-        $this->actingAs($app->user)->post('/mis-postulaciones/'.$app->id.'/enviar',['confirm' => true])->assertSessionHasErrors('application');
-        $this->assertSame('BORRADOR',$app->fresh()->status);
+        $this->actingAs($app->user)->post('/mis-postulaciones/'.$app->id.'/enviar', ['confirm' => true])->assertSessionHasErrors('application');
+        $this->assertSame('BORRADOR', $app->fresh()->status);
         Notification::assertNothingSent();
     }
 }
