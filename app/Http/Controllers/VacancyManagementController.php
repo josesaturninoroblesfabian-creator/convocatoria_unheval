@@ -18,6 +18,31 @@ use Throwable;
 
 class VacancyManagementController extends Controller
 {
+    public function createFirst(): Response
+    {
+        return $this->form();
+    }
+
+    public function storeFirst(StoreVacancyRequest $request): RedirectResponse
+    {
+        $vacancy = DB::transaction(function () use ($request): Vacancy {
+            $call = RecruitmentCall::create([
+                ...$request->safe()->only(['modality', 'opens_at', 'closes_at', 'is_demo']),
+                'code' => 'CONV-'.now()->year.'-'.Str::ulid(),
+                'title' => 'Convocatoria docente · '.$request->validated('school'),
+                'description' => 'Consulta las fichas de las plazas, sus requisitos y los documentos del proceso.',
+                'status' => 'BORRADOR',
+                'schedule' => [['label' => 'Inscripción digital', 'date' => 'Consulta la apertura y el cierre de inscripción publicados.']],
+                'rubric' => [],
+            ]);
+            AuditEvent::record('CONVOCATORIA_CREADA', $call);
+
+            return $this->createVacancy($call, $request->safe()->except(['modality', 'opens_at', 'closes_at', 'is_demo']));
+        });
+
+        return redirect()->route('management.vacancies.edit', $vacancy)->with('success', 'Primera plaza y convocatoria guardadas en borrador. Puedes adjuntar los PDF de la plaza.');
+    }
+
     public function create(RecruitmentCall $recruitmentCall): Response
     {
         return $this->form($recruitmentCall);
@@ -32,10 +57,8 @@ class VacancyManagementController extends Controller
     {
         $vacancy = DB::transaction(function () use ($request, $recruitmentCall): Vacancy {
             $call = $this->lockDraft($recruitmentCall->id);
-            $vacancy = $call->vacancies()->create(['requirements' => [], ...$request->validated()]);
-            AuditEvent::record('PLAZA_CREADA', $vacancy);
 
-            return $vacancy;
+            return $this->createVacancy($call, $request->validated());
         });
 
         return redirect()->route('management.vacancies.edit', $vacancy)->with('success', 'Ficha guardada. Puedes adjuntar las bases y otros documentos.');
@@ -116,12 +139,20 @@ class VacancyManagementController extends Controller
         return back()->with('success', 'PDF retirado de la ficha.');
     }
 
-    private function form(RecruitmentCall $call, ?Vacancy $vacancy = null): Response
+    private function createVacancy(RecruitmentCall $call, array $data): Vacancy
     {
-        abort_unless($call->status === 'BORRADOR', 409);
+        $vacancy = $call->vacancies()->create(['requirements' => [], ...$data]);
+        AuditEvent::record('PLAZA_CREADA', $vacancy);
+
+        return $vacancy;
+    }
+
+    private function form(?RecruitmentCall $call = null, ?Vacancy $vacancy = null): Response
+    {
+        abort_if($call && $call->status !== 'BORRADOR', 409);
 
         return Inertia::render('VacancyForm', [
-            'call' => $call->only('id', 'code', 'title', 'modality', 'opens_at', 'closes_at'),
+            'call' => $call?->only('id', 'code', 'title', 'modality', 'opens_at', 'closes_at'),
             'vacancy' => $vacancy,
             'contractHours' => Vacancy::CONTRACT_HOURS,
             'faculties' => Vacancy::query()->distinct()->orderBy('faculty')->pluck('faculty'),

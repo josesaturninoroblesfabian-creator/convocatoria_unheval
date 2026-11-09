@@ -285,11 +285,16 @@ function saveJury() {
                     <Icon name="ClipboardCheck" />
                     <h2>Ficha de evaluación de prueba</h2>
                 </div>
+                <p v-if="!call.rubric.length" class="muted">
+                    La evaluación está pendiente. Puedes configurarla al editar
+                    la convocatoria cuando termines los requisitos de las
+                    plazas.
+                </p>
                 <div v-for="r in call.rubric" :key="r.key" class="schedule-row">
                     <span>{{ r.name }}</span
                     ><b>{{ r.max }} pts.</b>
                 </div>
-                <p class="footnote">
+                <p v-if="call.rubric.length" class="footnote">
                     Puntajes manuales de demostración. No reemplazan los anexos
                     normativos oficiales.
                 </p>
@@ -331,9 +336,7 @@ function saveJury() {
             @click.self="editingScreening = null"
         >
             <form class="modal wide-modal" @submit.prevent="saveScreening">
-                <p class="eyebrow">
-                    Paso 3 de 3 · Configuración de postulación
-                </p>
+                <p class="eyebrow">Configuración de postulación</p>
                 <h2>Requisitos y filtros de {{ editingScreening.school }}</h2>
                 <Errors :errors="screeningForm.errors" /><ScreeningEditor
                     v-model="screeningForm.screening_rules"

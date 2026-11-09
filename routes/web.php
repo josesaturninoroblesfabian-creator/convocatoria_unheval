@@ -54,7 +54,8 @@ Route::middleware('auth')->group(function () {
     });
     Route::middleware('role:administrador,gestor')->prefix('gestion')->group(function () {
         Route::get('/convocatorias', [ManagementController::class, 'calls'])->name('management.calls');
-        Route::get('/convocatorias/nueva', [ManagementController::class, 'create'])->name('management.calls.create');
+        Route::get('/convocatorias/nueva', [VacancyManagementController::class, 'createFirst'])->name('management.calls.create');
+        Route::post('/convocatorias/primera-plaza', [VacancyManagementController::class, 'storeFirst'])->name('management.calls.first-vacancy');
         Route::post('/convocatorias', [ManagementController::class, 'store'])->name('management.calls.store');
         Route::get('/convocatorias/{recruitmentCall}', [ManagementController::class, 'show'])->name('management.calls.show');
         Route::get('/convocatorias/{recruitmentCall}/editar', [ManagementController::class, 'edit'])->name('management.calls.edit');

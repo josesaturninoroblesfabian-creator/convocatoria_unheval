@@ -15,13 +15,12 @@ class StoreVacancyRequest extends FormRequest
 
     public function after(): array
     {
-        return ConfigureScreeningRequest::validateFields($this);
+        return $this->isFirstVacancy() ? [] : ConfigureScreeningRequest::validateFields($this);
     }
 
     protected function prepareForValidation(): void
     {
-        $call = $this->route('recruitmentCall') ?? $this->route('vacancy')?->recruitmentCall;
-        if ($call?->modality === 'CONTRATO' && is_string($this->input('category'))) {
+        if ($this->isContract() && is_string($this->input('category'))) {
             $hours = Vacancy::CONTRACT_HOURS[$this->input('category')] ?? null;
             if ($hours !== null) {
                 $this->merge(['weekly_hours' => $hours, 'dedication' => 'CONTRATO']);
@@ -33,10 +32,16 @@ class StoreVacancyRequest extends FormRequest
     {
         $vacancy = $this->route('vacancy');
         $call = $this->route('recruitmentCall') ?? $vacancy?->recruitmentCall;
-        $contract = $call?->modality === 'CONTRATO';
+        $contract = $this->isContract();
+        $first = $this->isFirstVacancy();
 
         return [
-            ...ConfigureScreeningRequest::configurationRules(),
+            ...($first ? [
+                'modality' => ['required', Rule::in(['NOMBRAMIENTO', 'CONTRATO'])],
+                'opens_at' => ['required', 'date_format:Y-m-d\TH:i'],
+                'closes_at' => ['required', 'date_format:Y-m-d\TH:i', 'after:opens_at'],
+                'is_demo' => ['required', 'boolean'],
+            ] : [...ConfigureScreeningRequest::configurationRules(), ...self::requirementRules()]),
             'faculty' => ['required', 'string', 'max:180'],
             'school' => ['required', 'string', 'max:180'],
             'airhsp' => ['required', 'string', 'max:30', Rule::unique('vacancies')->where('recruitment_call_id', $call?->id)->ignore($vacancy)],
@@ -45,21 +50,36 @@ class StoreVacancyRequest extends FormRequest
             'dedication' => ['required', Rule::in($contract ? ['CONTRATO'] : ['TIEMPO COMPLETO', 'DEDICACIÓN EXCLUSIVA', 'TIEMPO PARCIAL'])],
             'weekly_hours' => ['required', 'integer', 'between:1,40'],
             'description' => ['nullable', 'string', 'max:4000'],
-            'professional_profile' => ['sometimes', 'required', 'string', 'max:6000'],
+            'professional_profile' => [...($first ? [] : ['sometimes']), 'required', 'string', 'max:6000'],
             'schedule' => ['sometimes', 'array', 'list', 'max:20'],
             'schedule.*' => ['array:label,starts_at,ends_at,detail'],
             'schedule.*.label' => ['required', 'string', 'max:150'],
             'schedule.*.starts_at' => ['required', 'date_format:Y-m-d\TH:i'],
             'schedule.*.ends_at' => ['nullable', 'date_format:Y-m-d\TH:i', 'after_or_equal:schedule.*.starts_at'],
             'schedule.*.detail' => ['nullable', 'string', 'max:300'],
-            ...self::requirementRules(),
-            'courses' => ['present', 'array', 'list', 'max:30'],
+            'courses' => $first ? ['required', 'array', 'list', 'min:1', 'max:30'] : ['present', 'array', 'list', 'max:30'],
             'courses.*' => ['array:code,name,ht,hp'],
             'courses.*.code' => ['required', 'string', 'max:30'],
             'courses.*.name' => ['required', 'string', 'max:180'],
             'courses.*.ht' => ['required', 'integer', 'between:0,40'],
             'courses.*.hp' => ['required', 'integer', 'between:0,40'],
         ];
+    }
+
+    private function isFirstVacancy(): bool
+    {
+        return $this->routeIs('management.calls.first-vacancy');
+    }
+
+    private function isContract(): bool
+    {
+        if ($this->isFirstVacancy()) {
+            return $this->input('modality') === 'CONTRATO';
+        }
+
+        $call = $this->route('recruitmentCall') ?? $this->route('vacancy')?->recruitmentCall;
+
+        return $call?->modality === 'CONTRATO';
     }
 
     public static function requirementRules(): array

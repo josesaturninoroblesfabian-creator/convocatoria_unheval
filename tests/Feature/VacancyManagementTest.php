@@ -11,6 +11,34 @@ use Tests\TestCase;
 
 class VacancyManagementTest extends TestCase
 {
+    public function test_new_call_opens_the_vacancy_form_and_saves_both_records_together(): void
+    {
+        $manager = User::factory()->manager()->create();
+        $this->actingAs($manager)->get(route('management.calls.create'))->assertInertia(fn (Assert $page) => $page
+            ->component('VacancyForm')->where('call', null)->where('vacancy', null)
+        );
+        $data = [...$this->profile(), 'modality' => 'CONTRATO', 'is_demo' => true, 'opens_at' => '2026-11-10T09:00', 'closes_at' => '2026-11-12T17:00'];
+        $this->post(route('management.calls.first-vacancy'), $data)->assertSessionHasErrors('category');
+        $this->assertDatabaseCount('recruitment_calls', 0);
+        $this->assertDatabaseCount('vacancies', 0);
+
+        $response = $this->post(route('management.calls.first-vacancy'), [...$data, 'category' => 'DC A2', 'status' => 'PUBLICADA']);
+        $call = RecruitmentCall::sole();
+        $vacancy = $call->vacancies()->sole();
+        $response->assertRedirect(route('management.vacancies.edit', $vacancy));
+        $this->assertSame('BORRADOR', $call->status);
+        $this->assertSame('CONTRATO', $call->modality);
+        $this->assertSame('Convocatoria docente · Turismo y Hotelería', $call->title);
+        $this->assertSame('2026-11-10 09:00', $call->opens_at->format('Y-m-d H:i'));
+        $this->assertSame([], $call->rubric);
+        $this->assertSame('DC A2', $vacancy->category);
+        $this->assertSame(16, $vacancy->weekly_hours);
+        $this->assertSame([], $vacancy->requirements);
+        $this->assertNull($vacancy->screening_rules);
+        $this->get(route('management.calls.show', ['recruitmentCall' => $call, 'configurar' => $vacancy->id]))
+            ->assertInertia(fn (Assert $page) => $page->where('requirementsVacancyId', $vacancy->id));
+    }
+
     public function test_new_call_continues_to_first_vacancy_then_to_its_own_screening_settings(): void
     {
         $manager = User::factory()->manager()->create();

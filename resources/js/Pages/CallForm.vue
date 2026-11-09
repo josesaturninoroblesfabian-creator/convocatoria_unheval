@@ -54,7 +54,9 @@ const form = useForm({
         },
     ],
     evaluation_mode: props.call?.evaluation_mode ?? null,
-    rubric: copyRubric(props.call?.rubric || defaultRubric()),
+    rubric: copyRubric(
+        props.call?.rubric?.length ? props.call.rubric : defaultRubric(),
+    ),
 });
 const usesTemplate = computed(() => form.evaluation_mode === referenceMode);
 const confirmingModeChange = ref(false);
@@ -92,18 +94,13 @@ function changeEvaluationMode() {
 
 function submit() {
     if (confirmingModeChange.value) return;
-    if (props.call) form.put(url("/gestion/convocatorias/" + props.call.id));
-    else form.post(url("/gestion/convocatorias"));
+    form.put(url("/gestion/convocatorias/" + props.call.id));
 }
 </script>
 <template>
     <AppLayout
-        :title="call ? 'Editar convocatoria' : 'Nueva convocatoria'"
-        :subtitle="
-            call
-                ? 'La convocatoria se guardará como borrador.'
-                : 'Paso 1 de 3 · Datos generales'
-        "
+        title="Editar convocatoria"
+        subtitle="La convocatoria se guardará como borrador."
         ><Errors :errors="form.errors" />
         <form @submit.prevent="submit" class="editor-form">
             <section class="panel">
@@ -181,47 +178,41 @@ function submit() {
                             required
                     /></label>
                 </div>
-                <p v-if="!call" class="muted">
-                    Las actividades de cada plaza se programan al completar su
-                    ficha.
-                </p>
-                <template v-else>
-                    <h3>Cronograma general de la convocatoria</h3>
-                    <div
-                        v-for="(s, i) in form.schedule"
-                        :key="i"
-                        class="dynamic-row"
-                    >
-                        <input
-                            v-model="s.label"
-                            aria-label="Actividad del cronograma"
-                            placeholder="Actividad"
-                            required
-                        /><input
-                            v-model="s.date"
-                            aria-label="Fecha de la actividad"
-                            placeholder="Fecha o rango publicado"
-                            required
-                        /><button
-                            type="button"
-                            class="icon-btn"
-                            aria-label="Quitar actividad"
-                            :disabled="form.schedule.length === 1"
-                            @click="form.schedule.splice(i, 1)"
-                        >
-                            <Icon name="X" :size="17" />
-                        </button>
-                    </div>
-                    <button
+                <h3>Cronograma general de la convocatoria</h3>
+                <div
+                    v-for="(s, i) in form.schedule"
+                    :key="i"
+                    class="dynamic-row"
+                >
+                    <input
+                        v-model="s.label"
+                        aria-label="Actividad del cronograma"
+                        placeholder="Actividad"
+                        required
+                    /><input
+                        v-model="s.date"
+                        aria-label="Fecha de la actividad"
+                        placeholder="Fecha o rango publicado"
+                        required
+                    /><button
                         type="button"
-                        class="btn btn-outline btn-sm"
-                        @click="form.schedule.push({ label: '', date: '' })"
+                        class="icon-btn"
+                        aria-label="Quitar actividad"
+                        :disabled="form.schedule.length === 1"
+                        @click="form.schedule.splice(i, 1)"
                     >
-                        <Icon name="Plus" :size="15" />Añadir actividad
+                        <Icon name="X" :size="17" />
                     </button>
-                </template>
+                </div>
+                <button
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    @click="form.schedule.push({ label: '', date: '' })"
+                >
+                    <Icon name="Plus" :size="15" />Añadir actividad
+                </button>
             </section>
-            <section v-if="call && hasVacancies" class="panel">
+            <section v-if="hasVacancies" class="panel">
                 <div class="panel-heading">
                     <Icon name="ClipboardCheck" />
                     <h2>Evaluación de prueba</h2>
@@ -417,12 +408,7 @@ function submit() {
                     class="btn btn-primary"
                     :disabled="form.processing || confirmingModeChange"
                 >
-                    {{
-                        form.processing
-                            ? "Guardando…"
-                            : call
-                              ? "Guardar borrador"
-                              : "Continuar a crear plaza"
+                    {{ form.processing ? "Guardando…" : "Guardar borrador"
                     }}<Icon name="Check" :size="18" />
                 </button>
             </div></form

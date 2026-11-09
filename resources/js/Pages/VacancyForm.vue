@@ -13,16 +13,30 @@ const props = defineProps({
     contractHours: Object,
     faculties: Array,
 });
-const contract = computed(() => props.call.modality === "CONTRATO");
-const callPath = computed(() => "/gestion/convocatorias/" + props.call.id);
+const firstVacancy = computed(() => !props.call);
+const callPath = computed(() =>
+    props.call
+        ? "/gestion/convocatorias/" + props.call.id
+        : "/gestion/convocatorias",
+);
 const vacancyPath = computed(() => "/gestion/plazas/" + props.vacancy?.id);
 const newCourse = () => ({ code: "", name: "", ht: 0, hp: 0 });
 const form = useForm({
+    ...(!props.call
+        ? {
+              modality: "NOMBRAMIENTO",
+              opens_at: "",
+              closes_at: "",
+              is_demo: true,
+          }
+        : {}),
     faculty: props.vacancy?.faculty ?? "",
     school: props.vacancy?.school ?? "",
     airhsp: props.vacancy?.airhsp ?? "",
     cap: props.vacancy?.cap ?? "",
-    category: props.vacancy?.category ?? (contract.value ? "" : "AUXILIAR"),
+    category:
+        props.vacancy?.category ??
+        (props.call?.modality === "CONTRATO" ? "" : "AUXILIAR"),
     dedication: props.vacancy?.dedication ?? "TIEMPO COMPLETO",
     weekly_hours: props.vacancy?.weekly_hours ?? 40,
     description: props.vacancy?.description ?? "",
@@ -32,6 +46,9 @@ const form = useForm({
         : [newCourse()],
     schedule: (props.vacancy?.schedule ?? []).map((event) => ({ ...event })),
 });
+const contract = computed(
+    () => (props.call?.modality ?? form.modality) === "CONTRATO",
+);
 const hours = computed(() => props.contractHours[form.category]);
 const rowKeys = {
     courses: form.courses.map(screeningRecordId),
@@ -41,6 +58,10 @@ const attachment = useForm({ name: "", file: null });
 const removing = useForm({});
 const fileInput = ref(null);
 const selectedDocument = ref(null);
+
+watch(contract, (isContract) => {
+    form.category = isContract ? "" : "AUXILIAR";
+});
 
 watch(
     () => form.dedication,
@@ -62,6 +83,8 @@ function removeRow(section, index) {
 function save() {
     if (props.vacancy) {
         form.put(url(vacancyPath.value), { preserveScroll: true });
+    } else if (firstVacancy.value) {
+        form.post(url("/gestion/convocatorias/primera-plaza"));
     } else {
         form.post(url(callPath.value + "/plazas"));
     }
@@ -90,12 +113,27 @@ function removeDocument() {
 
 <template>
     <AppLayout
-        :title="vacancy ? 'Editar ficha de plaza' : 'Crear plaza docente'"
-        :subtitle="'Paso 2 de 3 · Ficha y documentos · ' + call.code"
+        :title="
+            firstVacancy
+                ? 'Crear primera plaza'
+                : vacancy
+                  ? 'Editar ficha de plaza'
+                  : 'Crear plaza docente'
+        "
+        :subtitle="
+            firstVacancy
+                ? 'Nueva convocatoria · Ficha de la plaza'
+                : 'Ficha y documentos · ' + call.code
+        "
     >
         <template #actions>
             <Link :href="url(callPath)" class="btn btn-outline">
-                <Icon name="ArrowLeft" :size="16" /> Volver a la convocatoria
+                <Icon name="ArrowLeft" :size="16" />
+                {{
+                    firstVacancy
+                        ? "Volver a convocatorias"
+                        : "Volver a la convocatoria"
+                }}
             </Link>
             <Link
                 v-if="vacancy"
@@ -107,8 +145,18 @@ function removeDocument() {
         </template>
 
         <div class="notice">
-            <strong>{{ label(call.modality) }} · {{ call.title }}</strong>
-            <p>
+            <strong v-if="firstVacancy"
+                >Empieza por la plaza que se va a convocar</strong
+            >
+            <strong v-else
+                >{{ label(call.modality) }} · {{ call.title }}</strong
+            >
+            <p v-if="firstVacancy">
+                Al guardar esta ficha se crea la convocatoria en borrador. Luego
+                podrás adjuntar los PDF, añadir otras plazas y configurar los
+                requisitos.
+            </p>
+            <p v-else>
                 Completa la ficha que verá el postulante. Los requisitos de
                 envío, filtros y evaluación se configuran después en la
                 convocatoria.
@@ -142,6 +190,13 @@ function removeDocument() {
                     <h2>1. Identificación de la plaza</h2>
                 </div>
                 <div class="form-grid">
+                    <label v-if="firstVacancy">
+                        Modalidad docente
+                        <select v-model="form.modality" required>
+                            <option value="NOMBRAMIENTO">Nombramiento</option>
+                            <option value="CONTRATO">Contratación</option>
+                        </select>
+                    </label>
                     <label
                         >Facultad
                         <input
@@ -361,7 +416,32 @@ function removeDocument() {
                     <Icon name="CalendarDays" />
                     <h2>4. Cronograma de la plaza</h2>
                 </div>
-                <p class="notice">
+                <template v-if="firstVacancy">
+                    <p class="muted">
+                        Indica cuándo se recibirán las postulaciones. Estas
+                        fechas se comparten con las demás plazas de la
+                        convocatoria. Hora de Perú.
+                    </p>
+                    <div class="form-grid">
+                        <label
+                            >Apertura de la inscripción
+                            <input
+                                v-model="form.opens_at"
+                                type="datetime-local"
+                                required
+                            />
+                        </label>
+                        <label
+                            >Cierre de la inscripción
+                            <input
+                                v-model="form.closes_at"
+                                type="datetime-local"
+                                required
+                            />
+                        </label>
+                    </div>
+                </template>
+                <p v-else class="notice">
                     <strong>Inscripción digital de la convocatoria</strong
                     ><br />
                     Del {{ date(call.opens_at, true) }} al
@@ -437,13 +517,19 @@ function removeDocument() {
                 </button>
             </section>
 
-            <div class="row end">
+            <div class="row end wrap">
+                <label v-if="firstVacancy" class="check-label">
+                    <input v-model="form.is_demo" type="checkbox" />
+                    Convocatoria de demostración
+                </label>
                 <button class="btn btn-primary" :disabled="form.processing">
                     <Icon name="Save" :size="17" />
                     {{
                         vacancy
                             ? "Guardar cambios de la ficha"
-                            : "Guardar ficha de plaza"
+                            : firstVacancy
+                              ? "Guardar plaza y crear convocatoria"
+                              : "Guardar ficha de plaza"
                     }}
                 </button>
             </div>

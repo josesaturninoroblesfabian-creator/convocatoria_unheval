@@ -59,11 +59,6 @@ class ManagementController extends Controller
         return Inertia::render('ManageCalls', ['calls' => RecruitmentCall::withCount('vacancies', 'applications')->latest('id')->get()]);
     }
 
-    public function create(): Response
-    {
-        return Inertia::render('CallForm', ['call' => null]);
-    }
-
     public function store(StoreCallRequest $request): RedirectResponse
     {
         $call = DB::transaction(function () use ($request) {
@@ -180,6 +175,9 @@ class ManagementController extends Controller
                 }
                 if ($call->evaluation_template && $call->vacancies()->has('jurors', '!=', 3)->exists()) {
                     throw ValidationException::withMessages(['status' => 'Asigna tres jurados titulares a cada plaza para probar la plantilla de nombramiento.']);
+                }
+                if (! $call->rubric) {
+                    throw ValidationException::withMessages(['status' => 'Configura la evaluación de la convocatoria antes de publicar.']);
                 }
                 if ($call->closes_at->isPast()) {
                     throw ValidationException::withMessages(['status' => 'La fecha de cierre ya pasó. Edita el cronograma antes de publicar.']);
