@@ -228,23 +228,26 @@ function tab(value) {
                             <td>
                                 <div
                                     v-if="
+                                        v.public_documents?.length ||
                                         v.recruitment_call.public_documents
                                             ?.length
                                     "
                                     class="process-docs"
                                 >
                                     <a
-                                        v-for="doc in v.recruitment_call
-                                            .public_documents"
+                                        v-for="doc in [
+                                            ...(v.public_documents ?? []),
+                                            ...(v.recruitment_call
+                                                .public_documents ?? []),
+                                        ]"
                                         :key="doc.path"
                                         :href="url(doc.path)"
                                         target="_blank"
                                         rel="noopener"
                                         class="btn btn-outline btn-sm"
-                                        ><Icon
-                                            name="FileText"
-                                            :size="14"
-                                        />{{ doc.name }}</a
+                                        ><Icon name="FileText" :size="14" />{{
+                                            doc.name
+                                        }}</a
                                     >
                                 </div>
                             </td>

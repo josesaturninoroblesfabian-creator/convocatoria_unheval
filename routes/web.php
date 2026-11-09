@@ -6,11 +6,13 @@ use App\Http\Controllers\ManagementController;
 use App\Http\Controllers\PortalController;
 use App\Http\Controllers\ProfileLookupController;
 use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\VacancyManagementController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [PortalController::class, 'index'])->name('portal');
 Route::get('/convocatorias/{recruitmentCall}', [PortalController::class, 'call'])->name('calls.show');
 Route::get('/plazas/{vacancy}', [PortalController::class, 'show'])->name('vacancies.show');
+Route::get('/plazas/{vacancy}/documentos/{document}', [PortalController::class, 'vacancyDocument'])->whereUuid('document')->name('vacancies.documents.show');
 Route::get('/resultados', [PortalController::class, 'results'])->name('results');
 Route::get('/ayuda', [PortalController::class, 'help'])->name('help');
 Route::middleware('guest')->group(function () {
@@ -57,7 +59,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/convocatorias/{recruitmentCall}', [ManagementController::class, 'show'])->name('management.calls.show');
         Route::get('/convocatorias/{recruitmentCall}/editar', [ManagementController::class, 'edit'])->name('management.calls.edit');
         Route::put('/convocatorias/{recruitmentCall}', [ManagementController::class, 'update'])->name('management.calls.update');
-        Route::post('/convocatorias/{recruitmentCall}/plazas', [ManagementController::class, 'vacancy'])->name('management.vacancies.store');
+        Route::get('/convocatorias/{recruitmentCall}/plazas/nueva', [VacancyManagementController::class, 'create'])->name('management.vacancies.create');
+        Route::post('/convocatorias/{recruitmentCall}/plazas', [VacancyManagementController::class, 'store'])->name('management.vacancies.store');
+        Route::get('/plazas/{vacancy}/editar', [VacancyManagementController::class, 'edit'])->name('management.vacancies.edit');
+        Route::put('/plazas/{vacancy}', [VacancyManagementController::class, 'update'])->name('management.vacancies.update');
+        Route::get('/plazas/{vacancy}/vista-previa', [VacancyManagementController::class, 'preview'])->name('management.vacancies.preview');
+        Route::post('/plazas/{vacancy}/documentos', [VacancyManagementController::class, 'attach'])->name('management.vacancies.documents.store');
+        Route::delete('/plazas/{vacancy}/documentos/{document}', [VacancyManagementController::class, 'detach'])->whereUuid('document')->name('management.vacancies.documents.destroy');
         Route::post('/convocatorias/{recruitmentCall}/cerrar-prueba', [ManagementController::class, 'closeDemo'])->name('management.demo.close');
         Route::post('/convocatorias/{recruitmentCall}/etapa', [ManagementController::class, 'transition'])->name('management.calls.transition');
         Route::put('/plazas/{vacancy}/formulario', [ManagementController::class, 'configureScreening'])->name('management.screening');

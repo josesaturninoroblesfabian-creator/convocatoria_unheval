@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\RecruitmentCall;
 use App\Models\Vacancy;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PortalController extends Controller
 {
@@ -37,6 +39,20 @@ class PortalController extends Controller
         abort_if($vacancy->recruitmentCall->status === 'BORRADOR', 404);
 
         return Inertia::render('Vacancy', ['vacancy' => $vacancy]);
+    }
+
+    public function vacancyDocument(Request $request, Vacancy $vacancy, string $document): StreamedResponse
+    {
+        abort_unless($vacancy->recruitmentCall->status !== 'BORRADOR' || $request->user()?->isManager(), 404);
+        $attachment = collect($vacancy->attached_documents)->firstWhere('id', $document);
+        $disk = Storage::disk('local');
+        abort_unless($attachment && $disk->exists($attachment['path']), 404);
+
+        return $disk->response($attachment['path'], $attachment['name'].'.pdf', [
+            'Content-Type' => 'application/pdf',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     public function call(RecruitmentCall $recruitmentCall): Response

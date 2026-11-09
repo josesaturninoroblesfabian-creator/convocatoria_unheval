@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\ConfigureScreeningRequest;
 use App\Http\Requests\StoreCallRequest;
-use App\Http\Requests\StoreVacancyRequest;
 use App\Http\Requests\UpdateAcademicProfileRequest;
 use App\Models\Application;
 use App\Models\AuditEvent;
@@ -101,18 +100,6 @@ class ManagementController extends Controller
         return redirect()->route('management.calls.show', $recruitmentCall)->with('success', 'Configuración guardada.');
     }
 
-    public function vacancy(StoreVacancyRequest $request, RecruitmentCall $recruitmentCall): RedirectResponse
-    {
-        DB::transaction(function () use ($request, $recruitmentCall) {
-            $call = RecruitmentCall::lockForUpdate()->findOrFail($recruitmentCall->id);
-            abort_unless($call->status === 'BORRADOR', 409);
-            $vacancy = $call->vacancies()->create($request->validated());
-            AuditEvent::record('PLAZA_CREADA', $vacancy);
-        });
-
-        return back()->with('success', 'Plaza añadida a la convocatoria.');
-    }
-
     public function configureScreening(ConfigureScreeningRequest $request, Vacancy $vacancy): RedirectResponse
     {
         DB::transaction(function () use ($request, $vacancy) {
@@ -170,6 +157,13 @@ class ManagementController extends Controller
                 }
                 if (! $call->vacancies()->exists() || $call->vacancies()->doesntHave('jurors')->exists()) {
                     throw ValidationException::withMessages(['status' => 'Añade al menos una plaza y asigna jurados a todas las plazas.']);
+                }
+                $missingRequirements = $call->vacancies()->whereNotNull('professional_profile')
+                    ->whereJsonLength('requirements', 0)
+                    ->get(['screening_rules'])
+                    ->contains(fn (Vacancy $vacancy): bool => ! ($vacancy->screening_rules['enabled'] ?? false));
+                if ($missingRequirements) {
+                    throw ValidationException::withMessages(['status' => 'Configura los requisitos de postulación de cada ficha nueva antes de publicar.']);
                 }
                 if ($call->evaluation_template && $call->vacancies()->has('jurors', '!=', 3)->exists()) {
                     throw ValidationException::withMessages(['status' => 'Asigna tres jurados titulares a cada plaza para probar la plantilla de nombramiento.']);

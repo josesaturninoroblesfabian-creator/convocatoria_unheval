@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { Link, router, usePage } from "@inertiajs/vue3";
 import PublicLayout from "../Layouts/PublicLayout.vue";
 import Icon from "../Components/Icon.vue";
@@ -8,7 +8,17 @@ import Errors from "../Components/Errors.vue";
 import { url, date, label } from "../lib/ui";
 import { useApplicationWindow } from "../lib/useApplicationWindow";
 const isOpen = useApplicationWindow();
-const props = defineProps({ vacancy: Object });
+const props = defineProps({ vacancy: Object, preview: Boolean });
+const documents = computed(() => [
+    ...(props.vacancy.public_documents ?? []),
+    ...(props.vacancy.recruitment_call.public_documents ?? []),
+]);
+const timeline = computed(() =>
+    [...(props.vacancy.schedule ?? [])].sort((left, right) =>
+        left.starts_at.localeCompare(right.starts_at),
+    ),
+);
+const localDate = (value) => date(value + "-05:00", true);
 const page = usePage();
 const busy = ref(false);
 function apply() {
@@ -28,9 +38,21 @@ function apply() {
     <PublicLayout :title="vacancy.school"
         ><div class="detail-heading">
             <div class="container">
-                <Link :href="url('/')" class="back-link"
-                    ><Icon name="ArrowLeft" :size="17" /> Todas las
-                    convocatorias</Link
+                <Link
+                    :href="
+                        url(
+                            preview
+                                ? '/gestion/plazas/' + vacancy.id + '/editar'
+                                : '/',
+                        )
+                    "
+                    class="back-link"
+                    ><Icon name="ArrowLeft" :size="17" />
+                    {{
+                        preview
+                            ? "Volver a editar la ficha"
+                            : "Todas las convocatorias"
+                    }}</Link
                 >
                 <div class="row wrap gap-12">
                     <Badge :value="vacancy.recruitment_call.status" /><span
@@ -48,17 +70,32 @@ function apply() {
         <div class="container detail-grid">
             <div>
                 <Errors :errors="$page.props.errors" />
-                <div v-if="vacancy.recruitment_call.is_demo" class="notice">
-                    Proceso de demostración. Los perfiles corresponden al cuadro
-                    de plazas 2026-IV. Las fechas de prueba y las calificaciones
-                    carecen de validez oficial.
+                <div v-if="preview" class="notice">
+                    Vista previa del gestor. Los cambios guardados aparecerán al
+                    publicar.
+                </div>
+                <div
+                    v-else-if="vacancy.recruitment_call.is_demo"
+                    class="notice"
+                >
+                    Proceso de demostración con fechas y calificaciones de
+                    prueba.
                 </div>
                 <section class="panel">
                     <div class="panel-heading">
                         <Icon name="BriefcaseBusiness" />
                         <h2>Sobre la plaza</h2>
                     </div>
-                    <p>{{ vacancy.recruitment_call.description }}</p>
+                    <p
+                        v-if="
+                            vacancy.description || !vacancy.professional_profile
+                        "
+                    >
+                        {{
+                            vacancy.description ||
+                            vacancy.recruitment_call.description
+                        }}
+                    </p>
                     <div class="info-grid">
                         <div>
                             <small>Registro AIRHSP</small
@@ -71,7 +108,19 @@ function apply() {
                             <small>Categoría</small
                             ><b>{{ label(vacancy.category) }}</b>
                         </div>
-                        <div>
+                        <div v-if="vacancy.contract_hours">
+                            <small>Jornada del contrato</small>
+                            <b
+                                >{{ vacancy.contract_hours.weekly }} h
+                                semanales</b
+                            >
+                            <small
+                                >{{ vacancy.contract_hours.teaching }} lectivas
+                                · {{ vacancy.contract_hours.other }} no
+                                lectivas</small
+                            >
+                        </div>
+                        <div v-else>
                             <small>Régimen de dedicación</small
                             ><b
                                 >{{ label(vacancy.dedication) }} ·
@@ -80,10 +129,25 @@ function apply() {
                         </div>
                     </div>
                 </section>
-                <section class="panel">
+                <section v-if="vacancy.professional_profile" class="panel">
                     <div class="panel-heading">
                         <Icon name="GraduationCap" />
-                        <h2>Perfil y documentos requeridos</h2>
+                        <h2>Perfil profesional</h2>
+                    </div>
+                    <p style="white-space: pre-line">
+                        {{ vacancy.professional_profile }}
+                    </p>
+                </section>
+                <section v-if="vacancy.requirements.length" class="panel">
+                    <div class="panel-heading">
+                        <Icon name="GraduationCap" />
+                        <h2>
+                            {{
+                                vacancy.professional_profile
+                                    ? "Documentos requeridos para postular"
+                                    : "Perfil y documentos requeridos"
+                            }}
+                        </h2>
                     </div>
                     <div
                         v-for="(r, i) in vacancy.requirements"
@@ -139,7 +203,45 @@ function apply() {
                         <Icon name="CalendarDays" />
                         <h2>Cronograma</h2>
                     </div>
-                    <div class="timeline">
+                    <div v-if="timeline.length" class="timeline">
+                        <div>
+                            <span></span>
+                            <div>
+                                <strong>Inscripción digital</strong>
+                                <p>
+                                    Del
+                                    {{
+                                        date(
+                                            vacancy.recruitment_call.opens_at,
+                                            true,
+                                        )
+                                    }}
+                                    al
+                                    {{
+                                        date(
+                                            vacancy.recruitment_call.closes_at,
+                                            true,
+                                        )
+                                    }}
+                                </p>
+                            </div>
+                        </div>
+                        <div v-for="(event, index) in timeline" :key="index">
+                            <span></span>
+                            <div>
+                                <strong>{{ event.label }}</strong>
+                                <p>
+                                    {{ localDate(event.starts_at)
+                                    }}<template v-if="event.ends_at">
+                                        al
+                                        {{ localDate(event.ends_at) }}</template
+                                    >
+                                </p>
+                                <p v-if="event.detail">{{ event.detail }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="timeline">
                         <div
                             v-for="(s, i) in vacancy.recruitment_call.schedule"
                             :key="i"
@@ -173,6 +275,7 @@ function apply() {
                         </div>
                         <button
                             v-if="
+                                !preview &&
                                 vacancy.recruitment_call
                                     .accepting_applications &&
                                 (!$page.props.auth.user ||
@@ -185,14 +288,14 @@ function apply() {
                             {{ busy ? "Preparando…" : "Preparar mi postulación"
                             }}<Icon name="ArrowRight" :size="17" />
                         </button>
-                        <div v-else class="notice">
+                        <div v-else-if="!preview" class="notice">
                             {{
                                 isOpen(vacancy.recruitment_call)
                                     ? "Ingresa con una cuenta de postulante."
                                     : "La inscripción de esta convocatoria está cerrada."
                             }}
                         </div>
-                        <p class="footnote">
+                        <p v-if="!preview" class="footnote">
                             Al iniciar creas un borrador. Tu postulación se
                             registra cuando confirmas el envío del expediente.
                         </p>
@@ -200,8 +303,7 @@ function apply() {
                     <div class="panel">
                         <h3>Documentos del proceso</h3>
                         <a
-                            v-for="doc in vacancy.recruitment_call
-                                .public_documents"
+                            v-for="doc in documents"
                             :key="doc.path"
                             :href="url(doc.path)"
                             target="_blank"
@@ -210,7 +312,12 @@ function apply() {
                             ><Icon name="FileText" /><span
                                 >{{ doc.name
                                 }}<small
-                                    >PDF · Fuente institucional</small
+                                    >PDF ·
+                                    {{
+                                        doc.id
+                                            ? "De esta plaza"
+                                            : "De la convocatoria"
+                                    }}</small
                                 ></span
                             ><Icon name="ArrowUpRight" :size="17" /></a
                         ><a

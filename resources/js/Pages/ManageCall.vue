@@ -4,12 +4,11 @@ import { Link, useForm } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
 import ScreeningEditor from "../Components/ScreeningEditor.vue";
-import { defaultScreeningRules } from "../lib/screening";
+import { defaultScreeningRules, screeningRecordId } from "../lib/screening";
 import Badge from "../Components/Badge.vue";
 import Errors from "../Components/Errors.vue";
 import { url, date, label } from "../lib/ui";
 const props = defineProps({ call: Object, jurors: Array });
-const adding = ref(false);
 const next = {
     BORRADOR: { status: "PUBLICADA", label: "Publicar convocatoria" },
     PUBLICADA: { status: "EN_EVALUACION", label: "Iniciar evaluación" },
@@ -29,35 +28,19 @@ function closeDemo() {
 }
 const transition = useForm({ status: next[props.call.status]?.status });
 const confirmation = ref(false);
-const vacancy = useForm({
-    screening_rules: defaultScreeningRules(),
-    faculty: "",
-    school: "",
-    airhsp: "",
-    cap: "",
-    category: "AUXILIAR",
-    dedication: "TIEMPO COMPLETO",
-    weekly_hours: 40,
-    courses: [{ code: "", name: "", ht: 0, hp: 0 }],
-    requirements: [
-        {
-            key: "titulo",
-            label: "Título profesional requerido para la plaza",
-            required: true,
-        },
-        {
-            key: "cv",
-            label: "Currículo documentado (méritos)",
-            required: false,
-        },
-    ],
-});
 const commission = useForm({ jurors: [] });
 const selectedVacancy = ref(null);
 const editingScreening = ref(null);
-const screeningForm = useForm({ screening_rules: defaultScreeningRules() });
+const screeningForm = useForm({
+    screening_rules: defaultScreeningRules(),
+    requirements: [],
+});
 function editScreening(v) {
     editingScreening.value = v;
+    screeningForm.requirements = (v.requirements ?? []).map((requirement) => ({
+        ...requirement,
+    }));
+    screeningForm.clearErrors();
     screeningForm.screening_rules = JSON.parse(
         JSON.stringify(v.screening_rules || defaultScreeningRules()),
     );
@@ -72,14 +55,6 @@ function move() {
     transition.status = next[props.call.status].status;
     transition.post(url(`/gestion/convocatorias/${props.call.id}/etapa`), {
         onSuccess: () => (confirmation.value = false),
-    });
-}
-function saveVacancy() {
-    vacancy.post(url(`/gestion/convocatorias/${props.call.id}/plazas`), {
-        onSuccess: () => {
-            adding.value = false;
-            vacancy.reset();
-        },
     });
 }
 function editJury(v) {
@@ -104,12 +79,12 @@ function saveJury() {
                 v-else-if="['PUBLICADA', 'EN_EVALUACION'].includes(call.status)"
                 :href="url('/expedientes?call=' + call.id + '&sort=recent')"
                 class="btn btn-outline"
-                ><Icon name="FolderOpen" :size="17" />Ver expedientes de esta convocatoria</Link
+                ><Icon name="FolderOpen" :size="17" />Ver expedientes de esta
+                convocatoria</Link
             ></template
         ><Errors
             :errors="{
                 ...transition.errors,
-                ...vacancy.errors,
                 ...commission.errors,
             }"
         />
@@ -190,17 +165,21 @@ function saveJury() {
             <div class="panel-heading between">
                 <div class="row">
                     <Icon name="GraduationCap" />
-                    <h2>Plazas y comisión evaluadora</h2>
+                    <h2>Plazas docentes</h2>
                 </div>
-                <button
+                <Link
                     v-if="call.status === 'BORRADOR'"
+                    :href="
+                        url(
+                            '/gestion/convocatorias/' +
+                                call.id +
+                                '/plazas/nueva',
+                        )
+                    "
                     class="btn btn-primary btn-sm"
-                    @click="adding = !adding"
                 >
-                    <Icon :name="adding ? 'X' : 'Plus'" :size="17" />{{
-                        adding ? "Cerrar formulario" : "Añadir plaza"
-                    }}
-                </button>
+                    <Icon name="Plus" :size="17" /> Crear plaza
+                </Link>
             </div>
             <div
                 v-for="v in call.vacancies"
@@ -231,16 +210,24 @@ function saveJury() {
                             ? "Formulario estructurado · mínimo " +
                               v.screening_rules.minimum_experience_months +
                               " meses de experiencia"
-                            : "Carga documental simple"
-                    }}</span
-                    ><button
-                        v-if="call.status === 'BORRADOR'"
-                        type="button"
-                        class="text-link"
-                        @click="editScreening(v)"
-                    >
-                        Configurar formulario
-                    </button>
+                            : v.requirements?.length
+                              ? "Revisión de documentos"
+                              : "Requisitos de postulación pendientes"
+                    }}</span>
+                    <template v-if="call.status === 'BORRADOR'">
+                        <Link
+                            :href="url('/gestion/plazas/' + v.id + '/editar')"
+                            class="btn btn-outline btn-sm"
+                            >Editar ficha y PDF</Link
+                        >
+                        <button
+                            type="button"
+                            class="text-link"
+                            @click="editScreening(v)"
+                        >
+                            Configurar requisitos y filtros
+                        </button>
+                    </template>
                 </div>
                 <div class="jury-box">
                     <Icon name="Users" :size="18" /><span class="grow">{{
@@ -265,178 +252,6 @@ function saveJury() {
                     requeridos.
                 </p>
             </div>
-            <form
-                v-if="adding"
-                class="form-section"
-                @submit.prevent="saveVacancy"
-            >
-                <h3>Nueva plaza</h3>
-                <ScreeningEditor v-model="vacancy.screening_rules" />
-                <div class="form-grid">
-                    <label
-                        >Facultad<input
-                            v-model="vacancy.faculty"
-                            required /></label
-                    ><label
-                        >Escuela profesional<input
-                            v-model="vacancy.school"
-                            required /></label
-                    ><label
-                        >Registro AIRHSP<input
-                            v-model="vacancy.airhsp"
-                            required
-                            maxlength="30"
-                            placeholder="Conservar ceros iniciales" /></label
-                    ><label
-                        >Código CAP<input
-                            v-model="vacancy.cap"
-                            required
-                            maxlength="30" /></label
-                    ><label
-                        >Categoría<select v-model="vacancy.category">
-                            <option
-                                v-for="c in [
-                                    'AUXILIAR',
-                                    'ASOCIADO',
-                                    'PRINCIPAL',
-                                    'DC A',
-                                    'DC B',
-                                ]"
-                                :key="c"
-                            >
-                                {{ c }}
-                            </option>
-                        </select></label
-                    ><label
-                        >Dedicación<select v-model="vacancy.dedication">
-                            <option
-                                v-for="d in [
-                                    'TIEMPO COMPLETO',
-                                    'DEDICACIÓN EXCLUSIVA',
-                                    'TIEMPO PARCIAL',
-                                ]"
-                                :key="d"
-                            >
-                                {{ d }}
-                            </option>
-                        </select></label
-                    ><label
-                        >Horas semanales<input
-                            v-model.number="vacancy.weekly_hours"
-                            required
-                            type="number"
-                            min="1"
-                            max="40"
-                    /></label>
-                </div>
-                <h3>Cursos</h3>
-                <div
-                    v-for="(c, i) in vacancy.courses"
-                    :key="i"
-                    class="course-editor"
-                >
-                    <input
-                        v-model="c.code"
-                        required
-                        aria-label="Código de curso"
-                        placeholder="Código"
-                    /><input
-                        v-model="c.name"
-                        required
-                        aria-label="Nombre de curso"
-                        placeholder="Nombre del curso"
-                    /><input
-                        v-model.number="c.ht"
-                        required
-                        aria-label="Horas teóricas"
-                        type="number"
-                        min="0"
-                        max="40"
-                        placeholder="HT"
-                    /><input
-                        v-model.number="c.hp"
-                        required
-                        aria-label="Horas prácticas"
-                        type="number"
-                        min="0"
-                        max="40"
-                        placeholder="HP"
-                    /><button
-                        class="icon-btn"
-                        type="button"
-                        aria-label="Quitar curso"
-                        @click="vacancy.courses.splice(i, 1)"
-                    >
-                        <Icon name="X" :size="16" />
-                    </button>
-                </div>
-                <button
-                    type="button"
-                    class="btn btn-outline btn-sm"
-                    @click="
-                        vacancy.courses.push({
-                            code: '',
-                            name: '',
-                            ht: 0,
-                            hp: 0,
-                        })
-                    "
-                >
-                    Añadir curso
-                </button>
-                <h3 class="form-section">Requisitos y archivos de sustento</h3>
-                <div
-                    v-for="(r, i) in vacancy.requirements"
-                    :key="i"
-                    class="requirement-editor"
-                >
-                    <input
-                        v-model="r.key"
-                        required
-                        aria-label="Clave de requisito"
-                        placeholder="Clave única"
-                    /><input
-                        v-model="r.label"
-                        required
-                        aria-label="Descripción del requisito"
-                        placeholder="Documento solicitado"
-                    /><label class="check-label"
-                        ><input
-                            v-model="r.required"
-                            type="checkbox"
-                        />Obligatorio</label
-                    ><button
-                        type="button"
-                        class="icon-btn"
-                        aria-label="Quitar requisito"
-                        @click="vacancy.requirements.splice(i, 1)"
-                    >
-                        <Icon name="X" :size="16" />
-                    </button>
-                </div>
-                <div class="row between">
-                    <button
-                        type="button"
-                        class="btn btn-outline btn-sm"
-                        @click="
-                            vacancy.requirements.push({
-                                key:
-                                    'requisito_' +
-                                    (vacancy.requirements.length + 1),
-                                label: '',
-                                required: true,
-                            })
-                        "
-                    >
-                        Añadir requisito</button
-                    ><button
-                        class="btn btn-primary"
-                        :disabled="vacancy.processing"
-                    >
-                        Guardar plaza
-                    </button>
-                </div>
-            </form>
         </section>
         <div class="dashboard-columns">
             <section class="panel">
@@ -504,10 +319,59 @@ function saveJury() {
             @click.self="editingScreening = null"
         >
             <form class="modal wide-modal" @submit.prevent="saveScreening">
-                <h2>Formulario de {{ editingScreening.school }}</h2>
+                <h2>Requisitos y filtros de {{ editingScreening.school }}</h2>
                 <Errors :errors="screeningForm.errors" /><ScreeningEditor
                     v-model="screeningForm.screening_rules"
                 />
+                <h3>Documentos que debe presentar el postulante</h3>
+                <p class="muted">
+                    Añade los sustentos solicitados por las bases. Los sustentos
+                    generados por el formulario estructurado se solicitan por
+                    separado.
+                </p>
+                <div
+                    v-for="(requirement, index) in screeningForm.requirements"
+                    :key="requirement.key"
+                    class="entry-card"
+                >
+                    <label
+                        >Documento
+                        <input
+                            v-model="requirement.label"
+                            required
+                            maxlength="1000"
+                    /></label>
+                    <label class="check-label"
+                        ><input
+                            v-model="requirement.required"
+                            type="checkbox"
+                        />
+                        Obligatorio</label
+                    >
+                    <button
+                        type="button"
+                        class="text-link"
+                        @click="screeningForm.requirements.splice(index, 1)"
+                    >
+                        Quitar
+                    </button>
+                </div>
+                <button
+                    v-if="screeningForm.requirements.length < 30"
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    @click="
+                        screeningForm.requirements.push({
+                            key:
+                                'req_' +
+                                screeningRecordId().replaceAll('-', ''),
+                            label: '',
+                            required: true,
+                        })
+                    "
+                >
+                    Añadir documento requerido
+                </button>
                 <div class="row end">
                     <button
                         type="button"

@@ -15,7 +15,7 @@ class ConfigureScreeningRequest extends FormRequest
 
     public function rules(): array
     {
-        return self::configurationRules();
+        return [...self::configurationRules(), ...StoreVacancyRequest::requirementRules()];
     }
 
     public function after(): array
