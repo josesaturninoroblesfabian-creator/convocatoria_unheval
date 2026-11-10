@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\Vacancy;
 use App\Services\NombramientoRubric;
 use App\Services\ProfileRegistryLookup;
+use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,7 +28,7 @@ class ManagementController extends Controller
     {
         $user = $request->user();
         if ($user->role === 'postulante') {
-            return Inertia::render('Dashboard', ['applications' => $user->applications()->with('vacancy', 'recruitmentCall')->latest('id')->get()]);
+            return Inertia::render('Dashboard', ['applications' => $user->applications()->with('vacancy', 'recruitmentCall')->latest('id')->get()->map(VacancyEvaluationWorkflow::applicantView(...))]);
         }
         $applications = Application::whereNotNull('submitted_at');
         $calls = RecruitmentCall::query();
@@ -74,6 +75,20 @@ class ManagementController extends Controller
     public function show(RecruitmentCall $recruitmentCall): Response
     {
         $recruitmentCall->load('vacancies.jurors:id,name');
+        $configuredVacancies = $recruitmentCall->vacancies->filter(VacancyEvaluationWorkflow::configured(...));
+        $reviewed = $recruitmentCall->status === 'EN_EVALUACION' && $configuredVacancies->isNotEmpty()
+            ? $recruitmentCall->applications()->whereIn('vacancy_id', $configuredVacancies->modelKeys())
+                ->whereNotNull('submitted_at')->whereIn('status', ['EVALUADA', 'NO_APTO'])
+                ->get(['id', 'vacancy_id', 'reference', 'status', 'evaluation_outcome'])
+                ->sortByDesc(fn (Application $application) => $application->evaluation_outcome['final'] ?? -1)
+                ->groupBy('vacancy_id')
+                ->map(fn ($group) => $group->map(fn (Application $application): array => [
+                    'id' => $application->id,
+                    'reference' => $application->reference,
+                    'result' => $application->evaluation_outcome['stage'] ?? $application->status,
+                    'score' => $application->evaluation_outcome['final'] ?? null,
+                ]))
+            : [];
 
         return Inertia::render('ManageCall', [
             'call' => $recruitmentCall,
@@ -86,6 +101,10 @@ class ManagementController extends Controller
                 ->filter(fn (Vacancy $vacancy): bool => $vacancy->internal_evaluation !== null)
                 ->values()
                 ->modelKeys(),
+            'publishedStages' => $recruitmentCall->vacancies->mapWithKeys(fn (Vacancy $vacancy): array => [
+                $vacancy->id => array_keys($vacancy->stage_publications ?? []),
+            ]),
+            'reviewed' => $reviewed,
         ]);
     }
 
@@ -135,7 +154,7 @@ class ManagementController extends Controller
             $call = RecruitmentCall::lockForUpdate()->findOrFail($vacancy->recruitment_call_id);
             abort_unless(in_array($call->status, ['BORRADOR', 'PUBLICADA'], true), 409);
             abort_if($call->applications()->whereNotNull('submitted_at')->exists(), 409, 'La comisión no se puede cambiar después de recibir expedientes.');
-            if ($call->evaluation_template && $call->status === 'PUBLICADA' && count($data['jurors']) !== 3) {
+            if (($call->evaluation_template || VacancyEvaluationWorkflow::configured($vacancy)) && $call->status === 'PUBLICADA' && count($data['jurors']) !== 3) {
                 throw ValidationException::withMessages(['jurors' => 'Esta convocatoria requiere tres jurados titulares por plaza.']);
             }
             $vacancy->jurors()->sync($data['jurors']);
@@ -168,7 +187,9 @@ class ManagementController extends Controller
                 throw ValidationException::withMessages(['status' => 'La transición de etapa no es válida.']);
             }
             if ($data['status'] === 'PUBLICADA') {
-                if ($call->vacancies()->where(fn ($vacancies) => $vacancies->whereNotNull('external_evaluation')->orWhereNotNull('internal_evaluation'))->exists()) {
+                $vacancies = $call->vacancies()->withCount('jurors')->get();
+                $hasRubrics = $vacancies->contains(fn (Vacancy $vacancy): bool => $vacancy->external_evaluation !== null || $vacancy->internal_evaluation !== null);
+                if ($hasRubrics && $vacancies->contains(fn (Vacancy $vacancy): bool => ! VacancyEvaluationWorkflow::configured($vacancy))) {
                     throw ValidationException::withMessages(['status' => 'La publicación queda pendiente hasta completar el flujo de evaluación por plaza.']);
                 }
                 if (! $call->is_demo) {
@@ -176,6 +197,11 @@ class ManagementController extends Controller
                 }
                 if (! $call->vacancies()->exists() || $call->vacancies()->doesntHave('jurors')->exists()) {
                     throw ValidationException::withMessages(['status' => 'Añade al menos una plaza y asigna jurados a todas las plazas.']);
+                }
+                if ($hasRubrics && $vacancies->contains(fn (Vacancy $vacancy): bool => $vacancy->jurors_count !== 3
+                    || ! collect($vacancy->requirements)->contains(fn (array $requirement): bool => $requirement['required'] && ! in_array($requirement['key'], ['silabo_interno', 'bonificacion_discapacidad'], true))
+                    || ! VacancyEvaluationWorkflow::validCalendar($vacancy, $call->closes_at))) {
+                    throw ValidationException::withMessages(['status' => 'Cada plaza necesita tres jurados, al menos un requisito obligatorio de aptitud y ventanas sucesivas de aptitud, externos e internos después del cierre.']);
                 }
                 $missingRequirements = $call->vacancies()->whereNotNull('professional_profile')
                     ->whereJsonLength('requirements', 0)
@@ -187,7 +213,7 @@ class ManagementController extends Controller
                 if ($call->evaluation_template && $call->vacancies()->has('jurors', '!=', 3)->exists()) {
                     throw ValidationException::withMessages(['status' => 'Asigna tres jurados titulares a cada plaza para probar la plantilla de nombramiento.']);
                 }
-                if (! $call->rubric) {
+                if (! $hasRubrics && ! $call->rubric) {
                     throw ValidationException::withMessages(['status' => 'Configura la evaluación de la convocatoria antes de publicar.']);
                 }
                 if ($call->closes_at->isPast()) {
@@ -198,6 +224,10 @@ class ManagementController extends Controller
                 throw ValidationException::withMessages(['status' => 'La inscripción debe haber cerrado antes de comenzar la evaluación.']);
             }
             if ($data['status'] === 'FINALIZADA') {
+                if ($call->vacancies()->get()->contains(fn (Vacancy $vacancy): bool => VacancyEvaluationWorkflow::configured($vacancy)
+                    && (! isset($vacancy->stage_publications['external']) || ! VacancyEvaluationWorkflow::phaseEnded($vacancy, 'internal')))) {
+                    throw ValidationException::withMessages(['status' => 'Publica los resultados externos y espera el cierre de la ventana interna de todas las plazas.']);
+                }
                 if ($call->applications()->whereNotNull('submitted_at')->whereNotIn('status', ['EVALUADA', 'NO_APTO'])->exists()) {
                     throw ValidationException::withMessages(['status' => 'Hay expedientes pendientes de revisión o de calificaciones del jurado.']);
                 }

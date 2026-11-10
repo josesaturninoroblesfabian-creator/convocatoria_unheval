@@ -43,12 +43,23 @@ class ApplicationWorkflow
                     throw ValidationException::withMessages(['application' => 'Falta el documento obligatorio: '.$requirement['label']]);
                 }
             }
+            $byVacancy = VacancyEvaluationWorkflow::configured($locked->vacancy);
+            if ($byVacancy) {
+                foreach (VacancyEvaluationWorkflow::evidence($locked) as $merit) {
+                    if (! empty($merit['reuse']) && ! $locked->documents->contains('requirement_key', $merit['reuse'])) {
+                        throw ValidationException::withMessages(['application' => 'Falta el sustento de aptitud elegido para: '.$merit['description']]);
+                    }
+                }
+            }
             if (! $locked->consented_at || ! $user->document_number || ! $user->phone) {
                 throw ValidationException::withMessages(['application' => 'Completa tus datos y acepta la declaración antes del envío.']);
             }
             $snapshot = $user->only('name', 'email', 'document_number', 'phone');
             $hash = hash('sha256', json_encode(['reference' => $locked->reference, 'vacancy_id' => $locked->vacancy_id, 'profile' => $snapshot, 'form' => $locked->form_data, 'screening' => $screeningReport, 'statement' => $locked->statement, 'documents' => $locked->documents->sortBy('requirement_key')->map->only(['requirement_key', 'sha256'])->values()->all()], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
-            $locked->update(['status' => 'RECIBIDA', 'submitted_at' => now(), 'applicant_snapshot' => $snapshot, 'receipt_hash' => $hash, 'screening_snapshot' => $screeningReport['enabled'] ? $screeningReport : null, 'declared_score' => $screeningReport['enabled'] && ! $call->evaluation_template ? $screeningReport['total'] : null]);
+            $declared = $byVacancy
+                ? array_sum(VacancyEvaluationWorkflow::scores($locked))
+                : ($screeningReport['enabled'] && ! $call->evaluation_template ? $screeningReport['total'] : null);
+            $locked->update(['status' => 'RECIBIDA', 'submitted_at' => now(), 'applicant_snapshot' => $snapshot, 'receipt_hash' => $hash, 'screening_snapshot' => $screeningReport['enabled'] ? $screeningReport : null, 'declared_score' => $declared]);
             AuditEvent::record('EXPEDIENTE_ENVIADO', $locked, ['hash' => $hash]);
             if ($notifyApplicant) {
                 DB::afterCommit(fn () => $user->notify(new ApplicationReceived($locked)));

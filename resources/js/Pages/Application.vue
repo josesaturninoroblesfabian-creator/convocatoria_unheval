@@ -8,12 +8,15 @@ import Badge from "../Components/Badge.vue";
 import Errors from "../Components/Errors.vue";
 import { url, date, shortRef } from "../lib/ui";
 import { useApplicationWindow } from "../lib/useApplicationWindow";
+import { screeningRecordId } from "../lib/screening";
 const isOpen = useApplicationWindow();
 const props = defineProps({
     application: Object,
     screening: Object,
     documentRequirements: Array,
     profileCredentials: Array,
+    meritCriteria: Object,
+    evaluationStatus: Object,
 });
 const step = ref(props.application.submitted_at ? 3 : 1);
 const sending = ref(false);
@@ -23,6 +26,32 @@ const form = useForm({
 });
 const upload = useForm({ requirement_key: "", file: null });
 const send = useForm({ confirm: false });
+const merits = useForm({
+    merits: (props.application.form_data?.merits ?? []).map((entry) => ({
+        ...entry,
+    })),
+});
+const aptitudeDocuments = computed(() =>
+    props.documentRequirements.filter(
+        (item) =>
+            !item.key.startsWith("merito_") &&
+            !["silabo_interno", "bonificacion_discapacidad"].includes(item.key),
+    ),
+);
+function addMerit() {
+    merits.merits.push({
+        id: screeningRecordId(),
+        criterion: "",
+        description: "",
+        quantity: 1,
+        reuse: null,
+    });
+}
+function saveMerits() {
+    merits.put(url(`/mis-postulaciones/${props.application.id}/meritos`), {
+        preserveScroll: true,
+    });
+}
 const editable = computed(
     () =>
         props.application.status === "BORRADOR" &&
@@ -43,6 +72,8 @@ const required = computed(() =>
 const ready = computed(
     () =>
         required.value.every((r) => doc(r.key)) &&
+        !merits.isDirty &&
+        merits.merits.every((merit) => !merit.reuse || doc(merit.reuse)) &&
         !!props.application.consented_at &&
         (!props.screening?.enabled || props.screening.eligible),
 );
@@ -90,7 +121,7 @@ function submit() {
             <button
                 v-for="(title, i) in [
                     'Información',
-                    'Documentos',
+                    evaluationStatus ? 'Sustentos y méritos' : 'Documentos',
                     'Revisión y envío',
                 ]"
                 :key="title"
@@ -208,6 +239,97 @@ function submit() {
                     </form>
                 </section>
                 <section v-if="step === 2" class="panel">
+                    <form
+                        v-if="editable && evaluationStatus"
+                        @submit.prevent="saveMerits"
+                    >
+                        <h2>Declara tus méritos</h2>
+                        <p>
+                            Selecciona el criterio, describe el mérito e indica
+                            la cantidad en la unidad solicitada. Guarda la lista
+                            para adjuntar los PDF o reutiliza un sustento de
+                            aptitud.
+                        </p>
+                        <Errors :errors="merits.errors" />
+                        <div
+                            v-for="(merit, index) in merits.merits"
+                            :key="merit.id"
+                            class="entry-card"
+                        >
+                            <label
+                                >Criterio
+                                <select v-model="merit.criterion" required>
+                                    <option value="" disabled>
+                                        Selecciona un criterio
+                                    </option>
+                                    <option
+                                        v-for="(
+                                            criterion, key
+                                        ) in meritCriteria"
+                                        :key="key"
+                                        :value="key"
+                                    >
+                                        {{ criterion.rubric_name }} ·
+                                        {{ criterion.name }} ({{
+                                            criterion.unit
+                                        }})
+                                    </option>
+                                </select>
+                            </label>
+                            <label
+                                >Descripción del mérito<input
+                                    v-model="merit.description"
+                                    required
+                                    maxlength="500"
+                            /></label>
+                            <label
+                                >Cantidad<input
+                                    v-model.number="merit.quantity"
+                                    type="number"
+                                    min="1"
+                                    max="1000"
+                                    required
+                            /></label>
+                            <label
+                                >Sustento
+                                <select v-model="merit.reuse">
+                                    <option :value="null">
+                                        Adjuntar PDF para este mérito
+                                    </option>
+                                    <option
+                                        v-for="item in aptitudeDocuments"
+                                        :key="item.key"
+                                        :value="item.key"
+                                    >
+                                        Reutilizar: {{ item.label }}
+                                    </option>
+                                </select>
+                            </label>
+                            <button
+                                type="button"
+                                class="text-link"
+                                @click="merits.merits.splice(index, 1)"
+                            >
+                                Quitar mérito
+                            </button>
+                        </div>
+                        <div class="row wrap">
+                            <button
+                                v-if="merits.merits.length < 150"
+                                type="button"
+                                class="btn btn-outline"
+                                @click="addMerit"
+                            >
+                                Añadir mérito
+                            </button>
+                            <button
+                                class="btn btn-primary"
+                                :disabled="merits.processing || !merits.isDirty"
+                            >
+                                Guardar méritos
+                            </button>
+                        </div>
+                    </form>
                     <div class="panel-heading">
                         <Icon name="Upload" />
                         <h2>Documentos de sustento</h2>
@@ -274,6 +396,64 @@ function submit() {
                     </div>
                 </section>
                 <section v-if="step === 3" class="panel">
+                    <div
+                        v-if="evaluationStatus && application.submitted_at"
+                        class="notice"
+                    >
+                        <strong>Seguimiento de la evaluación</strong>
+                        <p v-if="application.status === 'RECIBIDA'">
+                            Tu expediente espera la revisión de aptitud.
+                        </p>
+                        <p v-else-if="evaluationStatus.result">
+                            Resultado publicado. Puntaje final:
+                            {{
+                                evaluationStatus.result.final ??
+                                "No alcanzó los mínimos"
+                            }}.
+                        </p>
+                        <p v-else-if="evaluationStatus.advanced">
+                            Aprobaste aspectos externos. Consulta la
+                            programación de aspectos internos.
+                        </p>
+                        <p
+                            v-else-if="
+                                evaluationStatus.externalPublished &&
+                                application.status === 'EVALUADA'
+                            "
+                        >
+                            Tu expediente no alcanzó el mínimo de aspectos
+                            externos.
+                        </p>
+                        <p v-else>
+                            Consulta el cronograma. El resultado consolidado se
+                            mostrará tras la publicación.
+                        </p>
+                        <div
+                            v-for="event in evaluationStatus.calendar"
+                            :key="event.stage"
+                            class="schedule-row"
+                        >
+                            <span>{{ event.label }} · {{ event.detail }}</span>
+                            <b
+                                >{{ event.starts_at.replace("T", " ") }} al
+                                {{ event.ends_at?.replace("T", " ") }}</b
+                            >
+                        </div>
+                    </div>
+                    <div
+                        v-if="evaluationStatus && merits.merits.length"
+                        class="form-section"
+                    >
+                        <h3>Méritos declarados</h3>
+                        <div
+                            v-for="entry in merits.merits"
+                            :key="entry.id"
+                            class="schedule-row"
+                        >
+                            <span>{{ entry.description }}</span
+                            ><b>{{ entry.quantity }}</b>
+                        </div>
+                    </div>
                     <div class="panel-heading">
                         <Icon
                             :name="

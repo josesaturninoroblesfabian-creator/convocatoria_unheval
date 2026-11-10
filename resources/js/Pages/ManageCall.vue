@@ -11,10 +11,16 @@ const props = defineProps({
     jurors: Array,
     configuredExternalVacancyIds: Array,
     configuredInternalVacancyIds: Array,
+    publishedStages: Object,
+    reviewed: [Object, Array],
 });
-const hasEvaluation = () =>
-    props.configuredExternalVacancyIds.length ||
-    props.configuredInternalVacancyIds.length;
+const resultLabels = {
+    NO_APTO: "No apto",
+    NO_SUPERA_EXTERNA: "No alcanza el mínimo externo",
+    NO_SUPERA_INTERNA: "No alcanza el mínimo interno",
+    NO_SUPERA_TOTAL: "No alcanza el mínimo total",
+    SUPERA_MINIMOS: "Supera los mínimos",
+};
 const next = {
     BORRADOR: { status: "PUBLICADA", label: "Publicar convocatoria" },
     PUBLICADA: { status: "EN_EVALUACION", label: "Iniciar evaluación" },
@@ -36,6 +42,29 @@ const transition = useForm({ status: next[props.call.status]?.status });
 const confirmation = ref(false);
 const commission = useForm({ jurors: [] });
 const selectedVacancy = ref(null);
+const scheduleVacancy = ref(null);
+const stagePublication = useForm({ phase: "" });
+function publishStage(vacancy, phase) {
+    stagePublication.phase = phase;
+    stagePublication.post(url(`/gestion/plazas/${vacancy.id}/publicar-etapa`), {
+        preserveScroll: true,
+    });
+}
+const calendar = useForm({ schedule: [], reason: "" });
+function editCalendar(vacancy) {
+    scheduleVacancy.value = vacancy;
+    calendar.clearErrors();
+    calendar.reason = "";
+    calendar.schedule = (vacancy.schedule ?? []).map((event) => ({ ...event }));
+}
+function saveCalendar() {
+    calendar.put(
+        url(`/gestion/plazas/${scheduleVacancy.value.id}/cronograma`),
+        {
+            onSuccess: () => (scheduleVacancy.value = null),
+        },
+    );
+}
 function move() {
     transition.status = next[props.call.status].status;
     transition.post(url(`/gestion/convocatorias/${props.call.id}/etapa`), {
@@ -71,6 +100,7 @@ function saveJury() {
             :errors="{
                 ...transition.errors,
                 ...commission.errors,
+                ...stagePublication.errors,
             }"
         />
         <div
@@ -136,12 +166,9 @@ function saveJury() {
                     ? "La evaluación puede comenzar después del cierre de inscripción."
                     : call.status === "EN_EVALUACION"
                       ? "Finalizar hace públicos los códigos y puntajes de los expedientes evaluados."
-                      : hasEvaluation()
-                        ? "La publicación queda pendiente hasta completar el flujo de evaluación por plaza."
-                        : "Revisa toda la configuración antes de avanzar de etapa."
+                      : "Revisa las rúbricas, los sustentos, el cronograma y la comisión antes de publicar."
             }}</span
             ><button
-                v-if="call.status !== 'BORRADOR' || !hasEvaluation()"
                 class="btn btn-primary btn-sm"
                 @click="confirmation = true"
             >
@@ -247,6 +274,74 @@ function saveJury() {
                         Asignar comisión
                     </button>
                 </div>
+                <details v-if="reviewed[v.id]?.length">
+                    <summary>
+                        Revisar resultados consolidados antes de publicar
+                    </summary>
+                    <div
+                        class="schedule-row"
+                        v-for="row in reviewed[v.id]"
+                        :key="row.id"
+                    >
+                        <Link
+                            :href="url('/expedientes/' + row.id)"
+                            class="text-link"
+                            >{{ row.reference }}</Link
+                        >
+                        <span
+                            >{{ resultLabels[row.result] }} ·
+                            {{ row.score ?? "Sin puntaje aprobatorio" }}</span
+                        >
+                    </div>
+                </details>
+                <button
+                    v-if="
+                        ['PUBLICADA', 'EN_EVALUACION'].includes(call.status) &&
+                        configuredInternalVacancyIds.includes(v.id) &&
+                        configuredExternalVacancyIds.includes(v.id)
+                    "
+                    type="button"
+                    class="text-link"
+                    @click="editCalendar(v)"
+                >
+                    Reprogramar evaluación
+                </button>
+                <div
+                    v-if="
+                        call.status === 'EN_EVALUACION' &&
+                        configuredInternalVacancyIds.includes(v.id) &&
+                        configuredExternalVacancyIds.includes(v.id)
+                    "
+                    class="row wrap"
+                >
+                    <button
+                        v-if="!publishedStages[v.id].includes('aptitude')"
+                        type="button"
+                        class="btn btn-outline btn-sm"
+                        :disabled="stagePublication.processing"
+                        @click="publishStage(v, 'aptitude')"
+                    >
+                        Publicar aptitud
+                    </button>
+                    <span v-else class="muted">Aptitud publicada</span>
+                    <button
+                        v-if="
+                            publishedStages[v.id].includes('aptitude') &&
+                            !publishedStages[v.id].includes('external')
+                        "
+                        type="button"
+                        class="btn btn-outline btn-sm"
+                        :disabled="stagePublication.processing"
+                        @click="publishStage(v, 'external')"
+                    >
+                        Publicar aspectos externos
+                    </button>
+                    <span
+                        v-if="publishedStages[v.id].includes('external')"
+                        class="muted"
+                        >Aspectos externos publicados</span
+                    >
+                </div>
             </div>
             <div v-if="!call.vacancies.length" class="empty-state compact">
                 <Icon name="GraduationCap" :size="34" />
@@ -286,6 +381,68 @@ function saveJury() {
                     normativos oficiales.
                 </p>
             </section>
+        </div>
+        <div
+            v-if="scheduleVacancy"
+            class="modal-backdrop"
+            @click.self="scheduleVacancy = null"
+        >
+            <form class="modal wide-modal" @submit.prevent="saveCalendar">
+                <h2>Reprogramar evaluación</h2>
+                <p>{{ scheduleVacancy.school }} · Hora de Perú</p>
+                <Errors :errors="calendar.errors" />
+                <div
+                    v-for="event in calendar.schedule.filter(
+                        (item) => item.stage,
+                    )"
+                    :key="event.stage"
+                    class="entry-card"
+                >
+                    <strong>{{ event.label }}</strong>
+                    <div class="form-grid">
+                        <label
+                            >Inicio<input
+                                v-model="event.starts_at"
+                                type="datetime-local"
+                                required
+                        /></label>
+                        <label
+                            >Cierre<input
+                                v-model="event.ends_at"
+                                type="datetime-local"
+                                required
+                        /></label>
+                    </div>
+                    <label
+                        >Indicaciones<input
+                            v-model="event.detail"
+                            maxlength="300"
+                    /></label>
+                </div>
+                <label
+                    >Motivo de la reprogramación<textarea
+                        v-model="calendar.reason"
+                        required
+                        minlength="5"
+                        maxlength="500"
+                    />
+                </label>
+                <div class="row end">
+                    <button
+                        type="button"
+                        class="btn btn-outline"
+                        @click="scheduleVacancy = null"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        :disabled="calendar.processing"
+                    >
+                        Guardar cronograma
+                    </button>
+                </div>
+            </form>
         </div>
         <div
             v-if="closingDemo"

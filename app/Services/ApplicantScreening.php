@@ -18,7 +18,7 @@ class ApplicantScreening
             return $application->screening_snapshot;
         }
         $rules = $application->vacancy->screening_rules;
-        if (! ($rules['enabled'] ?? false)) {
+        if (VacancyEvaluationWorkflow::configured($application->vacancy) || ! ($rules['enabled'] ?? false)) {
             return ['enabled' => false, 'eligible' => true, 'issues' => [], 'checks' => [], 'total' => 0];
         }
         $cutoff = CarbonImmutable::today()->min(CarbonImmutable::parse($application->recruitmentCall->closes_at)->startOfDay());
@@ -168,6 +168,17 @@ class ApplicantScreening
     public function documents(Application $application): array
     {
         $requirements = $application->vacancy->requirements;
+        if (VacancyEvaluationWorkflow::configured($application->vacancy)) {
+            $requirements = array_map(fn (array $requirement): array => $requirement['key'] === 'silabo_interno'
+                ? [...$requirement, 'required_for_aptitude' => false] : $requirement, $requirements);
+            foreach (VacancyEvaluationWorkflow::evidence($application) as $merit) {
+                if (empty($merit['reuse'])) {
+                    $requirements[] = ['key' => 'merito_'.$merit['id'], 'label' => 'Mérito: '.$merit['description'], 'required' => true, 'required_for_aptitude' => false];
+                }
+            }
+
+            return $requirements;
+        }
         if (! ($application->vacancy->screening_rules['enabled'] ?? false)) {
             return $requirements;
         }

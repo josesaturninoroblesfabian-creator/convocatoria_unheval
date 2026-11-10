@@ -56,6 +56,27 @@ const rowKeys = {
     schedule: form.schedule.map(screeningRecordId),
 };
 const attachment = useForm({ name: "", file: null });
+const aptitude = useForm({
+    requirements: (props.vacancy?.requirements ?? []).map((item) => ({
+        ...item,
+    })),
+});
+const bonusKey = "bonificacion_discapacidad";
+const syllabusKey = "silabo_interno";
+function addRequirement(bonus = false) {
+    aptitude.requirements.push({
+        key: bonus ? bonusKey : screeningRecordId(),
+        label: bonus ? "Sustento de discapacidad para bonificación final" : "",
+        required: !bonus,
+    });
+}
+function addSyllabus() {
+    aptitude.requirements.push({
+        key: syllabusKey,
+        label: "Sílabo o planeación didáctica",
+        required: false,
+    });
+}
 const removing = useForm({});
 const fileInput = ref(null);
 const selectedDocument = ref(null);
@@ -476,6 +497,15 @@ function removeDocument() {
                             required
                             placeholder="Ej. Clase modelo"
                     /></label>
+                    <label>
+                        Ventana de revisión
+                        <select v-model="event.stage">
+                            <option :value="null">Actividad informativa</option>
+                            <option value="aptitude">Aptitud</option>
+                            <option value="external">Aspectos externos</option>
+                            <option value="internal">Aspectos internos</option>
+                        </select>
+                    </label>
                     <div class="form-grid">
                         <label
                             >Fecha y hora de inicio
@@ -488,6 +518,7 @@ function removeDocument() {
                             >Fecha y hora de término <small>Opcional</small
                             ><input
                                 v-model="event.ends_at"
+                                :required="Boolean(event.stage)"
                                 type="datetime-local"
                                 :min="event.starts_at || undefined"
                         /></label>
@@ -510,6 +541,7 @@ function removeDocument() {
                             starts_at: '',
                             ends_at: '',
                             detail: '',
+                            stage: null,
                         })
                     "
                 >
@@ -612,6 +644,89 @@ function removeDocument() {
             </template>
         </section>
 
+        <form
+            v-if="vacancy"
+            class="panel"
+            @submit.prevent="
+                aptitude.put(url(vacancyPath + '/aptitud'), {
+                    preserveScroll: true,
+                })
+            "
+        >
+            <h2>Sustentos de aptitud</h2>
+            <p class="muted">
+                Registra los documentos y declaraciones juradas que exige el
+                Fólder A de esta plaza. Los méritos se declaran aparte según la
+                rúbrica.
+            </p>
+            <Errors :errors="aptitude.errors" />
+            <div
+                v-for="(item, index) in aptitude.requirements"
+                :key="item.key"
+                class="entry-card"
+            >
+                <label
+                    >Documento o declaración<input
+                        v-model="item.label"
+                        required
+                        maxlength="1000"
+                /></label>
+                <label class="check-label"
+                    ><input
+                        v-model="item.required"
+                        type="checkbox"
+                        :disabled="item.key === bonusKey"
+                    />
+                    Obligatorio</label
+                >
+                <button
+                    type="button"
+                    class="text-link"
+                    @click="aptitude.requirements.splice(index, 1)"
+                >
+                    Quitar
+                </button>
+            </div>
+            <div class="row wrap">
+                <button
+                    v-if="aptitude.requirements.length < 30"
+                    type="button"
+                    class="btn btn-outline"
+                    @click="addRequirement()"
+                >
+                    Añadir sustento
+                </button>
+                <button
+                    v-if="
+                        aptitude.requirements.length < 30 &&
+                        !aptitude.requirements.some(
+                            (item) => item.key === bonusKey,
+                        )
+                    "
+                    type="button"
+                    class="btn btn-outline"
+                    @click="addRequirement(true)"
+                >
+                    Añadir sustento opcional de bonificación
+                </button>
+                <button
+                    v-if="
+                        aptitude.requirements.length < 30 &&
+                        !aptitude.requirements.some(
+                            (item) => item.key === syllabusKey,
+                        )
+                    "
+                    type="button"
+                    class="btn btn-outline"
+                    @click="addSyllabus"
+                >
+                    Añadir sílabo para internos
+                </button>
+                <button class="btn btn-primary" :disabled="aptitude.processing">
+                    Guardar sustentos
+                </button>
+            </div>
+        </form>
         <div v-if="vacancy" class="notice row between wrap">
             <div>
                 <strong>Siguiente paso · Rúbricas de evaluación</strong>

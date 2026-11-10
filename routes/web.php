@@ -40,6 +40,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/plazas/{vacancy}/postular', [ApplicationController::class, 'store'])->name('applications.store');
         Route::get('/mis-postulaciones/{application}', [ApplicationController::class, 'show'])->name('applications.show');
         Route::put('/mis-postulaciones/{application}/formulario', [ApplicationController::class, 'saveForm'])->name('applications.form');
+        Route::put('/mis-postulaciones/{application}/meritos', [ApplicationController::class, 'saveMerits'])->name('applications.merits');
         Route::put('/mis-postulaciones/{application}', [ApplicationController::class, 'update'])->name('applications.update');
         Route::post('/mis-postulaciones/{application}/documentos', [ApplicationController::class, 'upload'])->middleware('throttle:30,1')->name('applications.upload');
         Route::post('/mis-postulaciones/{application}/enviar', [ApplicationController::class, 'submit'])->name('applications.submit');
@@ -71,6 +72,9 @@ Route::middleware('auth')->group(function () {
         Route::post('/convocatorias/{recruitmentCall}/cerrar-prueba', [ManagementController::class, 'closeDemo'])->name('management.demo.close');
         Route::post('/convocatorias/{recruitmentCall}/etapa', [ManagementController::class, 'transition'])->name('management.calls.transition');
         Route::put('/plazas/{vacancy}/formulario', [ManagementController::class, 'configureScreening'])->name('management.screening');
+        Route::put('/plazas/{vacancy}/aptitud', [VacancyManagementController::class, 'aptitude'])->name('management.vacancies.aptitude');
+        Route::put('/plazas/{vacancy}/cronograma', [VacancyManagementController::class, 'reschedule'])->name('management.vacancies.reschedule');
+        Route::post('/plazas/{vacancy}/publicar-etapa', [VacancyManagementController::class, 'publishStage'])->name('management.vacancies.publish-stage');
         Route::get('/plazas/{vacancy}/aspectos-externos', [VacancyEvaluationController::class, 'edit'])->defaults('stage', 'external')->name('management.vacancies.external.edit');
         Route::put('/plazas/{vacancy}/aspectos-externos', [VacancyEvaluationController::class, 'update'])->defaults('stage', 'external')->name('management.vacancies.external.update');
         Route::get('/plazas/{vacancy}/aspectos-internos', [VacancyEvaluationController::class, 'edit'])->defaults('stage', 'internal')->name('management.vacancies.internal.edit');

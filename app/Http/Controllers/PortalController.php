@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\RecruitmentCall;
 use App\Models\Vacancy;
+use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
@@ -38,7 +39,7 @@ class PortalController extends Controller
         $vacancy->load('recruitmentCall');
         abort_if($vacancy->recruitmentCall->status === 'BORRADOR', 404);
 
-        return Inertia::render('Vacancy', ['vacancy' => $vacancy]);
+        return Inertia::render('Vacancy', ['vacancy' => $vacancy, 'stagePublications' => $vacancy->stage_publications ?? []]);
     }
 
     public function vacancyDocument(Request $request, Vacancy $vacancy, string $document): StreamedResponse
@@ -74,13 +75,18 @@ class PortalController extends Controller
             'vacancies' => $call->vacancies->map(fn ($vacancy) => [
                 'school' => $vacancy->school,
                 'airhsp' => $vacancy->airhsp,
+                'by_vacancy' => VacancyEvaluationWorkflow::configured($vacancy),
                 'rows' => $vacancy->applications->map(fn ($application) => [
                     'reference' => $application->reference,
                     'status' => $application->status,
-                    'outcome' => $application->evaluation_outcome,
-                    'score' => $call->evaluation_template
+                    'outcome' => VacancyEvaluationWorkflow::configured($vacancy)
+                        ? ['stage' => $application->evaluation_outcome['stage'] ?? null]
+                        : $application->evaluation_outcome,
+                    'score' => VacancyEvaluationWorkflow::configured($vacancy)
+                        ? ($application->evaluation_outcome['final'] ?? null)
+                        : ($call->evaluation_template
                         ? ($application->evaluation_outcome['total'] ?? null)
-                        : ($application->status === 'EVALUADA' ? round((float) $application->evaluations->avg('total'), 3) : null),
+                        : ($application->status === 'EVALUADA' ? round((float) $application->evaluations->avg('total'), 3) : null)),
                 ])->sortByDesc('score')->values(),
             ]),
         ]);

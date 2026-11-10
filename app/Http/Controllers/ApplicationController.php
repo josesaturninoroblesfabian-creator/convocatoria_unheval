@@ -10,6 +10,7 @@ use App\Models\RecruitmentCall;
 use App\Models\Vacancy;
 use App\Services\ApplicantScreening;
 use App\Services\ApplicationWorkflow;
+use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -26,7 +27,7 @@ class ApplicationController extends Controller
 {
     public function index(Request $request): Response
     {
-        return Inertia::render('Applications', ['applications' => $request->user()->applications()->with('vacancy', 'recruitmentCall')->withCount('documents')->latest('id')->get()]);
+        return Inertia::render('Applications', ['applications' => $request->user()->applications()->with('vacancy', 'recruitmentCall')->withCount('documents')->latest('id')->get()->map(VacancyEvaluationWorkflow::applicantView(...))]);
     }
 
     public function store(Request $request, Vacancy $vacancy, ApplicationWorkflow $workflow): RedirectResponse
@@ -64,9 +65,17 @@ class ApplicationController extends Controller
         $report = $screening->assess($application);
 
         return Inertia::render('Application', [
-            'application' => $application,
+            'application' => VacancyEvaluationWorkflow::applicantView($application),
             'screening' => $report,
             'documentRequirements' => $screening->documents($application),
+            'meritCriteria' => $application->status === 'BORRADOR' && VacancyEvaluationWorkflow::configured($application->vacancy)
+                ? VacancyEvaluationWorkflow::criteria($application->vacancy) : [],
+            'evaluationStatus' => VacancyEvaluationWorkflow::configured($application->vacancy) ? [
+                'calendar' => VacancyEvaluationWorkflow::windows($application->vacancy),
+                'advanced' => $application->submitted_at && isset($application->vacancy->stage_publications['external']) && VacancyEvaluationWorkflow::externalPassed($application),
+                'externalPublished' => isset($application->vacancy->stage_publications['external']),
+                'result' => $application->recruitmentCall->results_published_at ? $application->evaluation_outcome : null,
+            ] : null,
             'profileCredentials' => $application->status === 'BORRADOR'
                 && $application->recruitmentCall->accepting_applications
                 && ($report['rules']['academic_credentials'] ?? false)
@@ -100,7 +109,7 @@ class ApplicationController extends Controller
             $locked = Application::lockForUpdate()->findOrFail($application->id);
             $workflow->assertOpen($call);
             abort_unless($locked->status === 'BORRADOR', 409);
-            abort_unless($locked->vacancy->screening_rules['enabled'] ?? false, 409);
+            abort_unless(! VacancyEvaluationWorkflow::configured($locked->vacancy) && ($locked->vacancy->screening_rules['enabled'] ?? false), 409);
             $data = array_replace(['experience' => [], 'training' => [], 'answers' => []], $request->safe()->only(['degree', 'professional_title', 'bachelor_date', 'credentials', 'experience', 'training', 'answers']));
             $previousCredentials = array_column($locked->form_data['credentials'] ?? [], null, 'id');
             $updatedCredentials = array_column($data['credentials'] ?? [], null, 'id');
@@ -170,6 +179,47 @@ class ApplicationController extends Controller
         return back()->with('success', 'Documento guardado correctamente.');
     }
 
+    public function saveMerits(Request $request, Application $application, ApplicationWorkflow $workflow): RedirectResponse
+    {
+        abort_unless($application->user_id === $request->user()->id, 404);
+        $data = $request->validate([
+            'merits' => ['present', 'array', 'list', 'max:150'],
+            'merits.*' => ['array:id,criterion,quantity,description,reuse'],
+            'merits.*.id' => ['required', 'uuid', 'distinct'],
+            'merits.*.criterion' => ['required', 'string', 'max:105'],
+            'merits.*.quantity' => ['required', 'integer', 'between:1,1000'],
+            'merits.*.description' => ['required', 'string', 'max:500'],
+            'merits.*.reuse' => ['nullable', 'string', 'max:40'],
+        ]);
+
+        DB::transaction(function () use ($application, $workflow, $data): void {
+            $call = RecruitmentCall::lockForUpdate()->findOrFail($application->recruitment_call_id);
+            $locked = Application::lockForUpdate()->findOrFail($application->id);
+            $workflow->assertOpen($call);
+            abort_unless($locked->status === 'BORRADOR' && VacancyEvaluationWorkflow::configured($locked->vacancy), 409);
+            $criteria = VacancyEvaluationWorkflow::criteria($locked->vacancy);
+            $requirements = array_diff(array_column($locked->vacancy->requirements, 'key'), ['bonificacion_discapacidad', 'silabo_interno']);
+            foreach ($data['merits'] as $index => $entry) {
+                if (! isset($criteria[$entry['criterion']])) {
+                    throw ValidationException::withMessages(["merits.$index.criterion" => 'Elige un criterio de esta plaza.']);
+                }
+                if (! empty($entry['reuse']) && ! in_array($entry['reuse'], $requirements, true)) {
+                    throw ValidationException::withMessages(["merits.$index.reuse" => 'Elige un sustento de aptitud de esta plaza.']);
+                }
+            }
+            $locked->update(['form_data' => [...($locked->form_data ?? []), 'merits' => $data['merits']]]);
+            $keys = array_map(fn (array $entry): string => 'merito_'.$entry['id'], array_filter($data['merits'], fn (array $entry): bool => empty($entry['reuse'])));
+            foreach ($locked->documents()->where('requirement_key', 'like', 'merito%')->whereNotIn('requirement_key', $keys)->get() as $document) {
+                if (str_starts_with($document->requirement_key, 'merito_')) {
+                    $document->delete();
+                    DB::afterCommit(fn () => Storage::disk('local')->delete($document->path));
+                }
+            }
+        });
+
+        return back()->with('success', 'Méritos guardados. Verifica que cada uno tenga un sustento antes del envío.');
+    }
+
     public function submit(Request $request, Application $application, ApplicationWorkflow $workflow): RedirectResponse
     {
         abort_unless($application->user_id === $request->user()->id, 404);
@@ -183,6 +233,10 @@ class ApplicationController extends Controller
     {
         $application = $document->application;
         abort_unless($application->user_id === $request->user()->id || ($application->submitted_at && ($workflow->canReview($request->user(), $application) || $request->user()->isManager())), 404);
+        if ($request->user()->role === 'jurado' && VacancyEvaluationWorkflow::configured($application->vacancy)) {
+            abort_if(in_array($application->status, ['RECIBIDA', 'NO_APTO'], true) && str_starts_with($document->requirement_key, 'merito_'), 404);
+            abort_if($document->requirement_key === 'silabo_interno' && ! VacancyEvaluationWorkflow::externalPassed($application), 404);
+        }
         abort_unless(Storage::disk('local')->exists($document->path), 404);
 
         return response()->file(Storage::disk('local')->path($document->path), ['Content-Type' => 'application/pdf', 'Content-Disposition' => 'inline; filename="documento.pdf"', 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store']);

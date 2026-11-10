@@ -21,6 +21,8 @@ const props = defineProps({
     juryCount: Number,
     evaluationTemplate: Object,
     evaluationProgress: Object,
+    phaseOpen: Boolean,
+    meritCriteria: Object,
 });
 const usesCredentials = computed(
     () => !!props.screening?.rules?.academic_credentials,
@@ -46,6 +48,7 @@ const confirming = ref(false);
 const canWrite = computed(
     () =>
         props.canReview &&
+        props.phaseOpen &&
         props.application.recruitment_call.status === "EN_EVALUACION",
 );
 const reviewStep = computed(() => {
@@ -309,7 +312,7 @@ function grade() {
                 <div v-if="!canWrite" class="notice">
                     {{
                         canReview
-                            ? "La revisión está habilitada únicamente durante la etapa de evaluación."
+                            ? "Verifica el cronograma y la publicación de la etapa anterior para continuar."
                             : "Vista de seguimiento. La revisión corresponde a los jurados asignados."
                     }}
                 </div>
@@ -425,6 +428,10 @@ function grade() {
                     :template="evaluationTemplate"
                     :progress="evaluationProgress"
                     :own-evaluation="ownEvaluation"
+                    :merits="application.form_data?.merits ?? []"
+                    :merit-criteria="meritCriteria"
+                    :documents="application.documents"
+                    @view-document="selected = $event"
                     :can-write="canWrite && application.status === 'APTO'"
                 />
                 <form v-else-if="canReview" @submit.prevent="confirming = true">

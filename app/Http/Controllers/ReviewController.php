@@ -8,6 +8,7 @@ use App\Models\RecruitmentCall;
 use App\Services\ApplicantScreening;
 use App\Services\ApplicationWorkflow;
 use App\Services\NombramientoEvaluation;
+use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,24 +25,54 @@ class ReviewController extends Controller
         abort_unless($application->submitted_at && ($request->user()->isManager() || $workflow->canReview($request->user(), $application)), 404);
         $own = $application->evaluations()->where('user_id', $request->user()->id)->first();
 
-        return Inertia::render('Review', ['application' => $application, 'screening' => $screening->assess($application), 'verifiedScreening' => $application->status !== 'RECIBIDA' ? $screening->verifiedAcademicReport($application) : null, 'documentRequirements' => $screening->documents($application), 'canReview' => $workflow->canReview($request->user(), $application), 'ownEvaluation' => $own, 'evaluationCount' => $application->evaluations()->count(), 'juryCount' => $application->vacancy->jurors()->count(), 'evaluationTemplate' => $application->recruitmentCall->evaluation_template, 'evaluationProgress' => $nombramiento->progress($application, $request->user())]);
+        $byVacancy = VacancyEvaluationWorkflow::configured($application->vacancy);
+        $requirements = $screening->documents($application);
+        $progress = $nombramiento->progress($application, $request->user());
+        if ($byVacancy && in_array($application->status, ['RECIBIDA', 'NO_APTO'], true)) {
+            $requirements = array_values(array_filter($requirements, fn (array $requirement): bool => $requirement['required_for_aptitude'] ?? true));
+            $application->setRelation('documents', $application->documents->whereIn('requirement_key', array_column($requirements, 'key'))->values());
+        }
+        if ($byVacancy && ! VacancyEvaluationWorkflow::externalPassed($application)) {
+            $application->setRelation('documents', $application->documents->where('requirement_key', '!=', 'silabo_interno')->values());
+        }
+        $phase = $application->status === 'RECIBIDA' ? 'aptitude' : (($progress['stage'] ?? null) === 'INTERNA' ? 'internal' : 'external');
+
+        return Inertia::render('Review', [
+            'application' => $application,
+            'screening' => $screening->assess($application),
+            'verifiedScreening' => $application->status !== 'RECIBIDA' ? $screening->verifiedAcademicReport($application) : null,
+            'documentRequirements' => $requirements,
+            'canReview' => $workflow->canReview($request->user(), $application),
+            'phaseOpen' => VacancyEvaluationWorkflow::phaseOpen($application->vacancy, $phase),
+            'ownEvaluation' => $own,
+            'evaluationCount' => $application->evaluations()->count(),
+            'juryCount' => $application->vacancy->jurors()->count(),
+            'evaluationTemplate' => VacancyEvaluationWorkflow::template($application),
+            'evaluationProgress' => $progress,
+            'meritCriteria' => $byVacancy ? VacancyEvaluationWorkflow::criteria($application->vacancy) : [],
+        ]);
     }
 
     public function eligibility(Request $request, Application $application, ApplicationWorkflow $workflow, ApplicantScreening $screening): RedirectResponse
     {
         abort_unless($workflow->canReview($request->user(), $application), 404);
-        $data = $request->validate(['notes' => ['required', 'string', 'min:5', 'max:3000'], 'documents' => ['required', 'array'], 'documents.*' => ['required', Rule::in(['CUMPLE', 'NO_CUMPLE'])], 'academic_profile_confirmed' => ['sometimes', 'boolean']]);
+        $data = $request->validate(['notes' => ['required', 'string', 'min:5', 'max:3000'], 'documents' => ['present', 'array'], 'documents.*' => ['required', Rule::in(['CUMPLE', 'NO_CUMPLE'])], 'academic_profile_confirmed' => ['sometimes', 'boolean']]);
         DB::transaction(function () use ($application, $data, $screening) {
             $call = RecruitmentCall::lockForUpdate()->findOrFail($application->recruitment_call_id);
             $locked = Application::lockForUpdate()->findOrFail($application->id);
             abort_unless($call->status === 'EN_EVALUACION' && $locked->status === 'RECIBIDA', 409);
             $locked->load('vacancy', 'documents');
-            $usesCredentials = $locked->vacancy->screening_rules['academic_credentials'] ?? false;
+            $byVacancy = VacancyEvaluationWorkflow::configured($locked->vacancy);
+            abort_unless(VacancyEvaluationWorkflow::phaseOpen($locked->vacancy, 'aptitude'), 409, 'La ventana de aptitud está cerrada.');
+            $usesCredentials = ! $byVacancy && ($locked->vacancy->screening_rules['academic_credentials'] ?? false);
             if ($usesCredentials && ! array_key_exists('academic_profile_confirmed', $data)) {
                 throw ValidationException::withMessages(['academic_profile_confirmed' => 'Indica si los sustentos acreditan el perfil académico de la plaza.']);
             }
             $eligible = true;
             foreach ($screening->documents($locked) as $requirement) {
+                if ($byVacancy && ! ($requirement['required_for_aptitude'] ?? true)) {
+                    continue;
+                }
                 $requiredForAptitude = $requirement['required_for_aptitude'] ?? $requirement['required'];
                 $document = $locked->documents->firstWhere('requirement_key', $requirement['key']);
                 if (! $document) {
@@ -77,7 +108,9 @@ class ReviewController extends Controller
             'action' => ['sometimes', Rule::in(['proponer', 'confirmar'])],
             'revision' => ['sometimes', 'integer', 'min:0'],
             'scores' => ['sometimes', 'array', 'max:30'],
-            'item_scores' => ['sometimes', 'array', 'max:3'],
+            'item_scores' => ['sometimes', 'array', 'max:30'],
+            'merits' => ['sometimes', 'array', 'max:150'],
+            'merits.*' => ['required', 'integer', 'between:0,1000'],
             'notes' => ['required', 'string', 'min:5', 'max:3000'],
         ]);
         $message = DB::transaction(function () use ($request, $application, $data, $nombramiento): string {
@@ -87,7 +120,7 @@ class ReviewController extends Controller
             if (! $call->is_demo) {
                 throw ValidationException::withMessages(['scores' => 'El motor de evaluación oficial debe validarse antes de calificar procesos reales.']);
             }
-            if ($call->evaluation_template) {
+            if (VacancyEvaluationWorkflow::template($locked)) {
                 $locked->setRelation('recruitmentCall', $call);
 
                 return $nombramiento->record($locked, $request->user(), $data);

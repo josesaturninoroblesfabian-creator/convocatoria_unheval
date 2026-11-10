@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Vacancy;
+use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -51,18 +52,26 @@ class StoreVacancyRequest extends FormRequest
             'weekly_hours' => ['required', 'integer', 'between:1,40'],
             'description' => ['nullable', 'string', 'max:4000'],
             'professional_profile' => [...($first ? [] : ['sometimes']), 'required', 'string', 'max:6000'],
-            'schedule' => ['sometimes', 'array', 'list', 'max:20'],
-            'schedule.*' => ['array:label,starts_at,ends_at,detail'],
-            'schedule.*.label' => ['required', 'string', 'max:150'],
-            'schedule.*.starts_at' => ['required', 'date_format:Y-m-d\TH:i'],
-            'schedule.*.ends_at' => ['nullable', 'date_format:Y-m-d\TH:i', 'after_or_equal:schedule.*.starts_at'],
-            'schedule.*.detail' => ['nullable', 'string', 'max:300'],
+            ...self::scheduleRules(),
             'courses' => $first ? ['required', 'array', 'list', 'min:1', 'max:30'] : ['present', 'array', 'list', 'max:30'],
             'courses.*' => ['array:code,name,ht,hp'],
             'courses.*.code' => ['required', 'string', 'max:30'],
             'courses.*.name' => ['required', 'string', 'max:180'],
             'courses.*.ht' => ['required', 'integer', 'between:0,40'],
             'courses.*.hp' => ['required', 'integer', 'between:0,40'],
+        ];
+    }
+
+    public static function scheduleRules(): array
+    {
+        return [
+            'schedule' => ['sometimes', 'array', 'list', 'max:20'],
+            'schedule.*' => ['array:label,starts_at,ends_at,detail,stage'],
+            'schedule.*.stage' => ['nullable', 'distinct', Rule::in(VacancyEvaluationWorkflow::PHASES)],
+            'schedule.*.label' => ['required', 'string', 'max:150'],
+            'schedule.*.starts_at' => ['required', 'date_format:Y-m-d\TH:i'],
+            'schedule.*.ends_at' => ['nullable', 'date_format:Y-m-d\TH:i', 'after_or_equal:schedule.*.starts_at'],
+            'schedule.*.detail' => ['nullable', 'string', 'max:300'],
         ];
     }
 

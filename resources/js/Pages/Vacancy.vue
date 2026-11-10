@@ -8,7 +8,17 @@ import Errors from "../Components/Errors.vue";
 import { url, date, label } from "../lib/ui";
 import { useApplicationWindow } from "../lib/useApplicationWindow";
 const isOpen = useApplicationWindow();
-const props = defineProps({ vacancy: Object, preview: Boolean });
+const props = defineProps({
+    vacancy: Object,
+    preview: Boolean,
+    stagePublications: [Object, Array],
+});
+const stageResults = {
+    APTO: "Apto",
+    NO_APTO: "No apto",
+    SUPERA_EXTERNA: "Pasa a aspectos internos",
+    NO_SUPERA_EXTERNA: "No alcanza el mínimo externo",
+};
 const documents = computed(() => [
     ...(props.vacancy.public_documents ?? []),
     ...(props.vacancy.recruitment_call.public_documents ?? []),
@@ -70,6 +80,49 @@ function apply() {
         <div class="container detail-grid">
             <div>
                 <Errors :errors="$page.props.errors" />
+                <section
+                    v-for="(publication, stage) in stagePublications"
+                    :key="stage"
+                    class="panel"
+                >
+                    <h2>
+                        {{
+                            stage === "aptitude"
+                                ? "Resultados de aptitud"
+                                : "Resultados de aspectos externos"
+                        }}
+                    </h2>
+                    <p class="muted">
+                        Publicado el {{ date(publication.published_at, true) }}.
+                        Usa el código de tu cargo de recepción.
+                    </p>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Código de expediente</th>
+                                    <th>Resultado</th>
+                                    <th v-if="stage === 'external'">Puntaje</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr
+                                    v-for="row in publication.rows"
+                                    :key="row.reference"
+                                >
+                                    <td class="mono">{{ row.reference }}</td>
+                                    <td>{{ stageResults[row.result] }}</td>
+                                    <td v-if="stage === 'external'">
+                                        {{ row.score }}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p v-if="!publication.rows.length">
+                        Esta etapa no registra expedientes.
+                    </p>
+                </section>
                 <div v-if="preview" class="notice">
                     Vista previa del gestor. Los cambios guardados aparecerán al
                     publicar.

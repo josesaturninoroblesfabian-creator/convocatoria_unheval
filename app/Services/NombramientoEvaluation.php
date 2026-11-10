@@ -12,7 +12,7 @@ class NombramientoEvaluation
 {
     public function progress(Application $application, User $user): ?array
     {
-        $template = $application->recruitmentCall->evaluation_template;
+        $template = VacancyEvaluationWorkflow::template($application);
         if (! $template) {
             return null;
         }
@@ -41,6 +41,7 @@ class NombramientoEvaluation
                 'revision' => $sheet['revision'],
                 'confirmed' => $confirmed,
                 'required' => $required,
+                'merits' => $sheet['merits'] ?? null,
             ] : null,
             'outcome' => $outcome,
         ];
@@ -49,6 +50,10 @@ class NombramientoEvaluation
     public function record(Application $application, User $user, array $data): string
     {
         $progress = $this->progress($application, $user);
+        $phase = ($data['stage'] ?? null) === 'interna' ? 'internal' : 'external';
+        if (! VacancyEvaluationWorkflow::phaseOpen($application->vacancy, $phase)) {
+            throw ValidationException::withMessages(['stage' => 'Verifica la ventana del cronograma y la publicación de la etapa anterior.']);
+        }
         if (($data['stage'] ?? null) === 'externa' && $progress['stage'] === 'EXTERNA') {
             return $this->recordExternal($application, $user, $data, $progress['minimums']);
         }
@@ -69,8 +74,14 @@ class NombramientoEvaluation
 
         $action = $data['action'] ?? null;
         if ($action === 'proponer') {
-            [$scores, $total] = $this->score($data['scores'] ?? [], $application->recruitmentCall->evaluation_template['external']);
+            $template = VacancyEvaluationWorkflow::template($application);
+            $merits = $template['byVacancy'] ?? false ? ($data['merits'] ?? []) : null;
+            $submitted = $merits !== null ? VacancyEvaluationWorkflow::scores($application, $merits) : ($data['scores'] ?? []);
+            [$scores, $total] = $this->score($submitted, $template['external']);
             $sheet = ['scores' => $scores, 'total' => $total / 1000, 'notes' => $data['notes'], 'revision' => $revision + 1, 'confirmations' => []];
+            if ($merits !== null) {
+                $sheet['merits'] = $merits;
+            }
         } elseif ($action !== 'confirmar' || ! $sheet || isset($sheet['confirmations'][$user->id])) {
             throw ValidationException::withMessages(['action' => 'Se necesita una propuesta vigente que aún no hayas confirmado.']);
         }
@@ -81,6 +92,7 @@ class NombramientoEvaluation
             'revision' => $sheet['revision'],
             'notes' => $data['notes'],
             'scores' => $action === 'proponer' ? $sheet['scores'] : null,
+            'merits' => $action === 'proponer' ? ($sheet['merits'] ?? null) : null,
         ]);
 
         if (count($sheet['confirmations']) !== $application->vacancy->jurors()->count()) {
@@ -99,7 +111,7 @@ class NombramientoEvaluation
             throw ValidationException::withMessages(['scores' => 'Tu evaluación interna ya está cerrada.']);
         }
 
-        $criteria = $application->recruitmentCall->evaluation_template['internal'];
+        $criteria = VacancyEvaluationWorkflow::template($application)['internal'];
         $details = [];
         if (isset($criteria[0]['items'])) {
             [$scores, $internalMilli, $details] = $this->scoreInternalItems($data['item_scores'] ?? [], $criteria);
@@ -110,7 +122,7 @@ class NombramientoEvaluation
         $externalMilli = (int) round($sheet['total'] * 1000);
         $evaluation = $application->evaluations()->create([
             'user_id' => $user->id,
-            'scores' => [...$sheet['scores'], ...$scores, ...($details ? ['_items' => $details] : [])],
+            'scores' => [...(VacancyEvaluationWorkflow::configured($application->vacancy) ? [] : $sheet['scores']), ...$scores, ...($details ? ['_items' => $details] : [])],
             'total' => ($internalMilli + $externalMilli) / 1000,
             'notes' => $data['notes'],
             'closed_at' => now(),
@@ -136,6 +148,12 @@ class NombramientoEvaluation
     private function close(Application $application, string $stage, float $external, ?float $internal, ?float $total): void
     {
         $outcome = ['stage' => $stage, 'passed' => $stage === 'SUPERA_MINIMOS', 'external' => $external, 'internal' => $internal, 'total' => $total];
+        if (VacancyEvaluationWorkflow::configured($application->vacancy)) {
+            $bonus = $outcome['passed'] && $application->documents()->where('requirement_key', 'bonificacion_discapacidad')->where('review_status', 'CUMPLE')->exists()
+                ? round($total * ($application->vacancy->external_evaluation['disability_bonus']['percent'] ?? 0) / 100, 3) : 0;
+            $outcome['bonus'] = $bonus;
+            $outcome['final'] = $outcome['passed'] ? round($total + $bonus, 3) : null;
+        }
         $application->update(['status' => 'EVALUADA', 'evaluation_outcome' => $outcome]);
         AuditEvent::record('EVALUACION_CONSOLIDADA', $application, $outcome);
     }
@@ -156,11 +174,12 @@ class NombramientoEvaluation
                 throw ValidationException::withMessages(['item_scores' => 'Completa todos los criterios de '.$criterion['name'].'.']);
             }
 
-            $scale = array_map('floatval', $criterion['scale']);
             $subtotalMilli = 0;
             foreach ($values as $index => $value) {
+                $item = $criterion['items'][$index];
+                $scale = array_map('floatval', is_array($item) ? array_column($item['levels'], 'points') : $criterion['scale']);
                 if (! is_numeric($value) || ! in_array((float) $value, $scale, true)) {
-                    throw ValidationException::withMessages(['item_scores' => 'Selecciona un valor de la escala para '.$criterion['items'][$index].'.']);
+                    throw ValidationException::withMessages(['item_scores' => 'Selecciona un valor de la escala para '.(is_array($item) ? $item['name'] : $item).'.']);
                 }
                 $details[$key][] = (float) $value;
                 $subtotalMilli += (int) round((float) $value * 1000);

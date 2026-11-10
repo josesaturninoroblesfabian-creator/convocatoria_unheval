@@ -84,7 +84,13 @@ function tied(rows, row) {
                                 <tr>
                                     <th>Código de expediente</th>
                                     <th>Estado</th>
-                                    <template v-if="usesReferenceRubric(c, v)">
+                                    <template v-if="v.by_vacancy">
+                                        <th>Puntaje final aprobatorio</th>
+                                        <th>Resultado</th>
+                                    </template>
+                                    <template
+                                        v-else-if="usesReferenceRubric(c, v)"
+                                    >
                                         <th>Externa (55)</th>
                                         <th>Interna (45)</th>
                                         <th>Total (100)</th>
@@ -100,7 +106,22 @@ function tied(rows, row) {
                                 <tr v-for="r in v.rows" :key="r.reference">
                                     <td class="mono">{{ r.reference }}</td>
                                     <td><Badge :value="r.status" /></td>
-                                    <template v-if="usesReferenceRubric(c, v)">
+                                    <template v-if="v.by_vacancy">
+                                        <td>{{ scoreText(r.score) }}</td>
+                                        <td>
+                                            {{
+                                                outcomeLabels[
+                                                    r.outcome?.stage
+                                                ] || "—"
+                                            }}<small v-if="tied(v.rows, r)"
+                                                >Empate pendiente de resolución
+                                                por la comisión</small
+                                            >
+                                        </td>
+                                    </template>
+                                    <template
+                                        v-else-if="usesReferenceRubric(c, v)"
+                                    >
                                         <td>
                                             {{ scoreText(r.outcome?.external) }}
                                         </td>

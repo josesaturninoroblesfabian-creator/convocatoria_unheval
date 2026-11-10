@@ -233,8 +233,8 @@ function save() {
                     >Tabla de referencia precargada. Puedes guardarla para esta
                     plaza.</span
                 >
-                El uso de esta rúbrica en los expedientes se habilitará al
-                configurar el flujo de evaluación.
+                La convocatoria de prueba usa las rúbricas guardadas al
+                publicar.
             </div>
             <Errors :errors="form.errors" />
 

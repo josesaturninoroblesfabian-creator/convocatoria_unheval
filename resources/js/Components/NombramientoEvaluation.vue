@@ -11,7 +11,11 @@ const props = defineProps({
     progress: Object,
     ownEvaluation: Object,
     canWrite: Boolean,
+    merits: Array,
+    meritCriteria: Object,
+    documents: Array,
 });
+const byVacancy = computed(() => props.template.byVacancy);
 
 const phase = computed(() => props.progress?.stage);
 const proposal = computed(() => props.progress?.proposal);
@@ -55,17 +59,68 @@ const activeCriteria = computed(() =>
           : [],
 );
 
-const form = useForm({ scores: {}, itemScores: {}, notes: "" });
+const form = useForm({ scores: {}, itemScores: {}, merits: {}, notes: "" });
 const points = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 3 });
 const itemKey = (criterion, index) => criterion.key + "-" + index;
 function subtotal(criterion) {
-    if (!criterion.items) return Number(form.scores[criterion.key] || 0);
+    if (!criterion.items) {
+        if (byVacancy.value) return meritSubtotal(criterion, form.merits);
+        return Number(form.scores[criterion.key] || 0);
+    }
     return criterion.items.reduce(
         (sum, _, index) =>
             sum + Number(form.itemScores[itemKey(criterion, index)] ?? 0),
         0,
     );
 }
+function meritSubtotal(rubric, quantities, includePending = false) {
+    let total = 0;
+    const exclusive = {};
+    for (const entry of props.merits) {
+        const criterion = props.meritCriteria[entry.criterion];
+        if (criterion?.rubric !== rubric.key) continue;
+        const quantity =
+            quantities[entry.id] ?? (includePending ? entry.quantity : 0);
+        if (
+            ["Grado más alto", "Un solo título", "Categoría más alta"].includes(
+                criterion.unit,
+            )
+        ) {
+            exclusive[criterion.unit] = Math.max(
+                exclusive[criterion.unit] ?? 0,
+                quantity > 0 ? criterion.points : 0,
+            );
+        } else {
+            total += quantity * criterion.points;
+        }
+    }
+    return Math.min(
+        rubric.max,
+        total +
+            Object.values(exclusive).reduce((sum, points) => sum + points, 0),
+    );
+}
+const assessment = computed(() =>
+    proposal.value && !adjusting.value
+        ? (proposal.value.merits ?? {})
+        : form.merits,
+);
+const externalTotals = computed(() =>
+    [false, true].map((pending) =>
+        props.template.external.reduce(
+            (sum, rubric) =>
+                sum + meritSubtotal(rubric, assessment.value, pending),
+            0,
+        ),
+    ),
+);
+const documentFor = (entry) =>
+    props.documents.find(
+        (document) =>
+            document.requirement_key === (entry.reuse || "merito_" + entry.id),
+    );
+const scale = (criterion, item) =>
+    item.levels ?? criterion.scale.map((value) => ({ points: value }));
 const draftTotal = computed(() =>
     activeCriteria.value.reduce(
         (sum, criterion) => sum + subtotal(criterion),
@@ -93,6 +148,7 @@ function isEditing(stage) {
 
 function startAdjustment() {
     form.scores = { ...proposal.value.scores };
+    form.merits = { ...proposal.value.merits };
     form.notes = "";
     form.clearErrors();
     adjustmentRevision.value = proposal.value.revision;
@@ -122,6 +178,8 @@ function reviewSubmission() {
                 ),
             ]),
         );
+    } else if (action.value === "proponer" && byVacancy.value) {
+        payload.merits = form.merits;
     } else if (action.value !== "confirmar") {
         payload.scores = Object.fromEntries(
             activeCriteria.value.map(({ key }) => [key, form.scores[key]]),
@@ -168,7 +226,11 @@ function refresh() {
 <template>
     <div>
         <div class="notice">
-            <strong>Nombramiento docente · rúbrica de referencia</strong>
+            <strong>{{
+                byVacancy
+                    ? "Rúbricas de la plaza"
+                    : "Nombramiento docente · rúbrica de referencia"
+            }}</strong>
             <p v-if="minimums">
                 Mínimos para esta plaza:
                 {{ points.format(minimums.external) }} externos,
@@ -260,8 +322,25 @@ function refresh() {
 
         <Errors :errors="form.errors" />
         <form @submit.prevent="reviewSubmission">
+            <div v-if="byVacancy && phase === 'EXTERNA'" class="notice">
+                <strong
+                    >Validado en la hoja
+                    {{ points.format(externalTotals[0]) }} puntos</strong
+                >
+                <p>
+                    Máximo posible con los sustentos pendientes
+                    {{ points.format(externalTotals[1]) }} puntos. El pase se
+                    decide al cerrar la hoja con las conformidades.
+                </p>
+            </div>
             <details
                 v-for="group in groups"
+                v-show="
+                    !byVacancy ||
+                    group.stage === phase ||
+                    (group.stage === 'EXTERNA' && phase !== 'EXTERNA') ||
+                    phase === 'COMPLETA'
+                "
                 :key="`${group.stage}-${phase}`"
                 :open="
                     group.stage === phase ||
@@ -328,7 +407,10 @@ function refresh() {
                                 :key="index"
                                 class="score-input"
                             >
-                                <span>{{ index + 1 }}. {{ item }}</span>
+                                <span
+                                    >{{ index + 1 }}.
+                                    {{ item.name ?? item }}</span
+                                >
                                 <select
                                     v-if="isEditing(group.stage)"
                                     v-model="
@@ -343,11 +425,16 @@ function refresh() {
                                         Seleccionar puntaje
                                     </option>
                                     <option
-                                        v-for="value in criterion.scale"
-                                        :key="value"
-                                        :value="value"
+                                        v-for="level in scale(criterion, item)"
+                                        :key="level.points"
+                                        :value="level.points"
                                     >
-                                        {{ points.format(value) }} puntos
+                                        {{ points.format(level.points) }} puntos
+                                        {{
+                                            level.description
+                                                ? " · " + level.description
+                                                : ""
+                                        }}
                                     </option>
                                 </select>
                                 <b v-else>{{
@@ -370,6 +457,73 @@ function refresh() {
                             </div>
                         </div>
                     </template>
+                    <div v-else-if="byVacancy && group.stage === 'EXTERNA'">
+                        <div
+                            v-for="entry in merits.filter(
+                                (entry) =>
+                                    meritCriteria[entry.criterion]?.rubric ===
+                                    criterion.key,
+                            )"
+                            :key="entry.id"
+                            class="entry-card"
+                        >
+                            <strong>{{ entry.description }}</strong>
+                            <p>
+                                {{ meritCriteria[entry.criterion].name }} ·
+                                {{ meritCriteria[entry.criterion].unit }} ·
+                                Cantidad declarada {{ entry.quantity }}
+                            </p>
+                            <button
+                                v-if="documentFor(entry)"
+                                type="button"
+                                class="text-link"
+                                @click="
+                                    $emit(
+                                        'view-document',
+                                        documentFor(entry).id,
+                                    )
+                                "
+                            >
+                                Ver sustento
+                                {{ entry.reuse ? "de aptitud" : "" }}
+                            </button>
+                            <p
+                                v-if="
+                                    entry.reuse &&
+                                    documentFor(entry)?.review_status
+                                "
+                            >
+                                Revisión de aptitud ·
+                                {{
+                                    documentFor(entry).review_status ===
+                                    "CUMPLE"
+                                        ? "Cumple"
+                                        : "No cumple"
+                                }}
+                            </p>
+                            <label v-if="isEditing(group.stage)">
+                                Cantidad acreditada (cero si se rechaza)
+                                <input
+                                    v-model.number="form.merits[entry.id]"
+                                    type="number"
+                                    min="0"
+                                    :max="entry.quantity"
+                                    required
+                                />
+                            </label>
+                            <p v-else-if="proposal?.merits?.[entry.id] != null">
+                                Cantidad acreditada
+                                {{ proposal.merits[entry.id] }}
+                            </p>
+                        </div>
+                        <p v-if="group.saved?.[criterion.key] != null">
+                            Subtotal
+                            {{
+                                points.format(group.saved[criterion.key])
+                            }}
+                            puntos
+                        </p>
+                    </div>
                     <input
                         v-else-if="isEditing(group.stage)"
                         :id="'nombramiento-score-' + criterion.key"

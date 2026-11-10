@@ -3,14 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreVacancyRequest;
+use App\Models\Application;
 use App\Models\AuditEvent;
 use App\Models\RecruitmentCall;
 use App\Models\Vacancy;
+use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -88,6 +91,98 @@ class VacancyManagementController extends Controller
         abort_unless($vacancy->recruitmentCall->status === 'BORRADOR', 409);
 
         return Inertia::render('Vacancy', ['vacancy' => $vacancy, 'preview' => true]);
+    }
+
+    public function aptitude(Request $request, Vacancy $vacancy): RedirectResponse
+    {
+        $data = $request->validate([
+            ...StoreVacancyRequest::requirementRules(),
+            'requirements' => ['present', 'array', 'list', 'max:30'],
+            'requirements.*.key' => ['required', 'alpha_dash:ascii', 'distinct', 'max:40', 'not_regex:/^merito_/'],
+        ]);
+        foreach ($data['requirements'] as $index => $requirement) {
+            if ($requirement['key'] === 'bonificacion_discapacidad' && $requirement['required']) {
+                throw ValidationException::withMessages(["requirements.$index.required" => 'El sustento de bonificación es opcional.']);
+            }
+        }
+        DB::transaction(function () use ($vacancy, $data): void {
+            $this->lockDraft($vacancy->recruitment_call_id);
+            $vacancy->update($data);
+            AuditEvent::record('REQUISITOS_APTITUD_CONFIGURADOS', $vacancy);
+        });
+
+        return back()->with('success', 'Lista de sustentos de aptitud guardada.');
+    }
+
+    public function reschedule(Request $request, Vacancy $vacancy): RedirectResponse
+    {
+        $data = $request->validate([
+            ...StoreVacancyRequest::scheduleRules(),
+            'schedule' => ['required', 'array', 'list', 'max:20'],
+            'reason' => ['required', 'string', 'min:5', 'max:500'],
+        ]);
+        DB::transaction(function () use ($vacancy, $data): void {
+            $call = RecruitmentCall::lockForUpdate()->findOrFail($vacancy->recruitment_call_id);
+            abort_unless(in_array($call->status, ['PUBLICADA', 'EN_EVALUACION'], true) && VacancyEvaluationWorkflow::configured($vacancy), 409);
+            $vacancy->refresh();
+            $previous = $vacancy->schedule;
+            $previousWindows = VacancyEvaluationWorkflow::windows($vacancy);
+            $vacancy->fill(['schedule' => $data['schedule']]);
+            if (! VacancyEvaluationWorkflow::validCalendar($vacancy, $call->closes_at)) {
+                throw ValidationException::withMessages(['schedule' => 'Indica las tres ventanas sucesivas de evaluación después del cierre de inscripción.']);
+            }
+            foreach (array_keys($vacancy->stage_publications ?? []) as $phase) {
+                if (VacancyEvaluationWorkflow::windows($vacancy)[$phase] != $previousWindows[$phase]) {
+                    throw ValidationException::withMessages(['schedule' => 'Las etapas con resultados publicados conservan su ventana.']);
+                }
+            }
+            $vacancy->save();
+            AuditEvent::record('CRONOGRAMA_PLAZA_REPROGRAMADO', $vacancy, ['reason' => $data['reason'], 'previous' => $previous, 'current' => $data['schedule']]);
+        });
+
+        return back()->with('success', 'Cronograma actualizado.');
+    }
+
+    public function publishStage(Request $request, Vacancy $vacancy): RedirectResponse
+    {
+        $phase = $request->validate(['phase' => ['required', Rule::in(['aptitude', 'external'])]])['phase'];
+        DB::transaction(function () use ($vacancy, $phase): void {
+            $call = RecruitmentCall::lockForUpdate()->findOrFail($vacancy->recruitment_call_id);
+            abort_unless($call->status === 'EN_EVALUACION', 409);
+            $vacancy->refresh();
+            abort_unless(VacancyEvaluationWorkflow::configured($vacancy), 409);
+            $publications = $vacancy->stage_publications ?? [];
+            if (isset($publications[$phase])) {
+                return;
+            }
+            if (! VacancyEvaluationWorkflow::phaseEnded($vacancy, $phase) || ($phase === 'external' && ! isset($publications['aptitude']))) {
+                throw ValidationException::withMessages(['phase' => 'Espera el cierre de la ventana y la publicación de la etapa anterior.']);
+            }
+            $vacancy->loadCount('jurors');
+            $applications = $vacancy->applications()->whereNotNull('submitted_at')->get();
+            $applications->each(fn (Application $application) => $application->setRelation('vacancy', $vacancy));
+            $pending = $applications->contains(fn (Application $application): bool => $application->status === 'RECIBIDA'
+                || ($phase === 'external' && $application->status !== 'NO_APTO'
+                    && ! VacancyEvaluationWorkflow::externalPassed($application)
+                    && ($application->evaluation_outcome['stage'] ?? null) !== 'NO_SUPERA_EXTERNA'));
+            if ($pending) {
+                throw ValidationException::withMessages(['phase' => 'Hay expedientes pendientes de cerrar en esta etapa.']);
+            }
+            $rows = $applications
+                ->filter(fn (Application $application): bool => $phase === 'aptitude' || $application->status !== 'NO_APTO')
+                ->map(fn (Application $application): array => [
+                    'reference' => $application->reference,
+                    'result' => $phase === 'aptitude'
+                        ? ($application->status === 'NO_APTO' ? 'NO_APTO' : 'APTO')
+                        : (VacancyEvaluationWorkflow::externalPassed($application) ? 'SUPERA_EXTERNA' : 'NO_SUPERA_EXTERNA'),
+                    'score' => $phase === 'external' ? $application->external_evaluation['total'] : null,
+                ])->values()->all();
+            $publications[$phase] = ['published_at' => now()->toIso8601String(), 'rows' => $rows];
+            $vacancy->update(['stage_publications' => $publications]);
+            AuditEvent::record('RESULTADOS_ETAPA_PUBLICADOS', $vacancy, ['phase' => $phase, 'count' => count($rows)]);
+        });
+
+        return back()->with('success', 'Resultados de etapa publicados.');
     }
 
     public function attach(Request $request, Vacancy $vacancy): RedirectResponse
