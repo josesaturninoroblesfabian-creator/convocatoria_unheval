@@ -46,11 +46,11 @@ class VacancyManagementTest extends TestCase
             ->assertSessionHasErrors('modality');
         $this->put(route('management.calls.update', $call), $callDetails)->assertSessionHas('success');
         $this->assertSame([], $call->fresh()->rubric);
-        $this->get(route('management.calls.show', ['recruitmentCall' => $call, 'configurar' => $vacancy->id]))
-            ->assertInertia(fn (Assert $page) => $page->where('requirementsVacancyId', $vacancy->id));
+        $this->get(route('management.vacancies.internal.edit', $vacancy))
+            ->assertInertia(fn (Assert $page) => $page->where('template.minimum', 26));
     }
 
-    public function test_new_call_continues_to_first_vacancy_then_to_its_own_screening_settings(): void
+    public function test_new_call_continues_to_first_vacancy_then_to_its_own_evaluation_settings(): void
     {
         $manager = User::factory()->manager()->create();
         $data = RecruitmentCall::factory()->make()->only(['code', 'title', 'description', 'modality', 'opens_at', 'closes_at', 'schedule', 'rubric', 'is_demo']);
@@ -62,11 +62,11 @@ class VacancyManagementTest extends TestCase
         $response = $this->post(route('management.vacancies.store', $call), $this->profile());
         $vacancy = $call->vacancies()->sole();
         $response->assertRedirect(route('management.vacancies.edit', $vacancy));
-        $this->get(route('management.calls.show', ['recruitmentCall' => $call, 'configurar' => $vacancy->id]))
-            ->assertInertia(fn (Assert $page) => $page->where('requirementsVacancyId', $vacancy->id));
-        $other = RecruitmentCall::factory()->draft()->create();
-        $this->get(route('management.calls.show', ['recruitmentCall' => $other, 'configurar' => $vacancy->id]))
-            ->assertInertia(fn (Assert $page) => $page->where('requirementsVacancyId', null));
+        $this->get(route('management.vacancies.external.edit', $vacancy))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('vacancy.id', $vacancy->id)
+                ->where('links.other', route('management.vacancies.internal.edit', $vacancy, false))
+            );
     }
 
     public function test_manager_creates_a_public_profile_then_configures_requirements_separately(): void

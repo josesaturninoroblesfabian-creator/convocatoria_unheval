@@ -71,19 +71,19 @@ class ManagementController extends Controller
         return redirect()->route('management.vacancies.create', $call)->with('success', 'Convocatoria guardada como borrador. Completa la ficha de la primera plaza.');
     }
 
-    public function show(Request $request, RecruitmentCall $recruitmentCall): Response
+    public function show(RecruitmentCall $recruitmentCall): Response
     {
         $recruitmentCall->load('vacancies.jurors:id,name');
-        $vacancy = $recruitmentCall->status === 'BORRADOR'
-            ? $recruitmentCall->vacancies->firstWhere('id', $request->integer('configurar'))
-            : null;
 
         return Inertia::render('ManageCall', [
             'call' => $recruitmentCall,
             'jurors' => User::where('role', 'jurado')->get(['id', 'name', 'email']),
-            'requirementsVacancyId' => $vacancy?->id,
             'configuredExternalVacancyIds' => $recruitmentCall->vacancies
                 ->filter(fn (Vacancy $vacancy): bool => $vacancy->external_evaluation !== null)
+                ->values()
+                ->modelKeys(),
+            'configuredInternalVacancyIds' => $recruitmentCall->vacancies
+                ->filter(fn (Vacancy $vacancy): bool => $vacancy->internal_evaluation !== null)
                 ->values()
                 ->modelKeys(),
         ]);
@@ -168,8 +168,8 @@ class ManagementController extends Controller
                 throw ValidationException::withMessages(['status' => 'La transición de etapa no es válida.']);
             }
             if ($data['status'] === 'PUBLICADA') {
-                if ($call->vacancies()->whereNotNull('external_evaluation')->exists()) {
-                    throw ValidationException::withMessages(['status' => 'Los aspectos externos por plaza están en configuración. La publicación requiere completar su flujo de evaluación.']);
+                if ($call->vacancies()->where(fn ($vacancies) => $vacancies->whereNotNull('external_evaluation')->orWhereNotNull('internal_evaluation'))->exists()) {
+                    throw ValidationException::withMessages(['status' => 'La publicación queda pendiente hasta completar el flujo de evaluación por plaza.']);
                 }
                 if (! $call->is_demo) {
                     throw ValidationException::withMessages(['status' => 'La publicación de procesos oficiales está pendiente de implementar y validar la normativa específica de nombramiento. Usa una convocatoria de demostración.']);

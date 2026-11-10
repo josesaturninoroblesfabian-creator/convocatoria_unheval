@@ -1,19 +1,20 @@
 <script setup>
-import { ref, watch } from "vue";
-import { Link, router, useForm } from "@inertiajs/vue3";
+import { ref } from "vue";
+import { Link, useForm } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
-import ScreeningEditor from "../Components/ScreeningEditor.vue";
-import { defaultScreeningRules, screeningRecordId } from "../lib/screening";
 import Badge from "../Components/Badge.vue";
 import Errors from "../Components/Errors.vue";
 import { url, date, label } from "../lib/ui";
 const props = defineProps({
     call: Object,
     jurors: Array,
-    requirementsVacancyId: Number,
     configuredExternalVacancyIds: Array,
+    configuredInternalVacancyIds: Array,
 });
+const hasEvaluation = () =>
+    props.configuredExternalVacancyIds.length ||
+    props.configuredInternalVacancyIds.length;
 const next = {
     BORRADOR: { status: "PUBLICADA", label: "Publicar convocatoria" },
     PUBLICADA: { status: "EN_EVALUACION", label: "Iniciar evaluación" },
@@ -35,43 +36,6 @@ const transition = useForm({ status: next[props.call.status]?.status });
 const confirmation = ref(false);
 const commission = useForm({ jurors: [] });
 const selectedVacancy = ref(null);
-const editingScreening = ref(null);
-const screeningForm = useForm({
-    screening_rules: defaultScreeningRules(),
-    requirements: [],
-});
-function editScreening(v) {
-    editingScreening.value = v;
-    screeningForm.requirements = (v.requirements ?? []).map((requirement) => ({
-        ...requirement,
-    }));
-    screeningForm.clearErrors();
-    screeningForm.screening_rules = JSON.parse(
-        JSON.stringify(v.screening_rules || defaultScreeningRules()),
-    );
-}
-watch(
-    () => props.requirementsVacancyId,
-    (id) => {
-        const vacancy = props.call.vacancies.find((item) => item.id === id);
-        if (vacancy && props.call.status === "BORRADOR") editScreening(vacancy);
-    },
-    { immediate: true },
-);
-function saveScreening(continueToExternal) {
-    const vacancyId = editingScreening.value.id;
-    screeningForm.put(
-        url(`/gestion/plazas/${vacancyId}/formulario`),
-        {
-            onSuccess: () => {
-                editingScreening.value = null;
-                if (continueToExternal) {
-                    router.visit(url(`/gestion/plazas/${vacancyId}/aspectos-externos`));
-                }
-            },
-        },
-    );
-}
 function move() {
     transition.status = next[props.call.status].status;
     transition.post(url(`/gestion/convocatorias/${props.call.id}/etapa`), {
@@ -172,12 +136,12 @@ function saveJury() {
                     ? "La evaluación puede comenzar después del cierre de inscripción."
                     : call.status === "EN_EVALUACION"
                       ? "Finalizar hace públicos los códigos y puntajes de los expedientes evaluados."
-                      : configuredExternalVacancyIds.length
+                      : hasEvaluation()
                         ? "La publicación queda pendiente hasta completar el flujo de evaluación por plaza."
                         : "Revisa toda la configuración antes de avanzar de etapa."
             }}</span
             ><button
-                v-if="call.status !== 'BORRADOR' || !configuredExternalVacancyIds.length"
+                v-if="call.status !== 'BORRADOR' || !hasEvaluation()"
                 class="btn btn-primary btn-sm"
                 @click="confirmation = true"
             >
@@ -229,33 +193,43 @@ function saveJury() {
                     /></Link>
                 </div>
                 <div class="row wrap screening-plaza-actions">
-                    <span class="muted">{{
-                        v.screening_rules?.enabled
-                            ? "Formulario estructurado · mínimo " +
-                              v.screening_rules.minimum_experience_months +
-                              " meses de experiencia"
-                            : v.requirements?.length
-                              ? "Revisión de documentos"
-                              : "Requisitos de postulación pendientes"
-                    }}</span>
                     <template v-if="call.status === 'BORRADOR'">
                         <Link
                             :href="url('/gestion/plazas/' + v.id + '/editar')"
                             class="btn btn-outline btn-sm"
                             >Editar ficha y PDF</Link
                         >
-                        <button
-                            type="button"
-                            class="text-link"
-                            @click="editScreening(v)"
-                        >
-                            Configurar requisitos y filtros
-                        </button>
                         <Link
-                            :href="url('/gestion/plazas/' + v.id + '/aspectos-externos')"
+                            :href="
+                                url(
+                                    '/gestion/plazas/' +
+                                        v.id +
+                                        '/aspectos-externos',
+                                )
+                            "
                             class="btn btn-outline btn-sm"
                         >
-                            {{ configuredExternalVacancyIds.includes(v.id) ? "Editar aspectos externos" : "Configurar aspectos externos" }}
+                            {{
+                                configuredExternalVacancyIds.includes(v.id)
+                                    ? "Editar aspectos externos"
+                                    : "Configurar aspectos externos"
+                            }}
+                        </Link>
+                        <Link
+                            :href="
+                                url(
+                                    '/gestion/plazas/' +
+                                        v.id +
+                                        '/aspectos-internos',
+                                )
+                            "
+                            class="btn btn-outline btn-sm"
+                        >
+                            {{
+                                configuredInternalVacancyIds.includes(v.id)
+                                    ? "Editar aspectos internos"
+                                    : "Configurar aspectos internos"
+                            }}
                         </Link>
                     </template>
                 </div>
@@ -342,93 +316,6 @@ function saveJury() {
                     </button>
                 </div>
             </section>
-        </div>
-        <div
-            v-if="editingScreening"
-            class="modal-backdrop"
-            @click.self="editingScreening = null"
-        >
-            <form
-                class="modal wide-modal"
-                @submit.prevent="saveScreening($event.submitter?.value === 'external')"
-            >
-                <p class="eyebrow">Configuración de postulación</p>
-                <h2>Requisitos y filtros de {{ editingScreening.school }}</h2>
-                <Errors :errors="screeningForm.errors" /><ScreeningEditor
-                    v-model="screeningForm.screening_rules"
-                />
-                <h3>Documentos que debe presentar el postulante</h3>
-                <p class="muted">
-                    Añade los sustentos solicitados por las bases. Los sustentos
-                    generados por el formulario estructurado se solicitan por
-                    separado.
-                </p>
-                <div
-                    v-for="(requirement, index) in screeningForm.requirements"
-                    :key="requirement.key"
-                    class="entry-card"
-                >
-                    <label
-                        >Documento
-                        <input
-                            v-model="requirement.label"
-                            required
-                            maxlength="1000"
-                    /></label>
-                    <label class="check-label"
-                        ><input
-                            v-model="requirement.required"
-                            type="checkbox"
-                        />
-                        Obligatorio</label
-                    >
-                    <button
-                        type="button"
-                        class="text-link"
-                        @click="screeningForm.requirements.splice(index, 1)"
-                    >
-                        Quitar
-                    </button>
-                </div>
-                <button
-                    v-if="screeningForm.requirements.length < 30"
-                    type="button"
-                    class="btn btn-outline btn-sm"
-                    @click="
-                        screeningForm.requirements.push({
-                            key:
-                                'req_' +
-                                screeningRecordId().replaceAll('-', ''),
-                            label: '',
-                            required: true,
-                        })
-                    "
-                >
-                    Añadir documento requerido
-                </button>
-                <div class="row end wrap">
-                    <button
-                        type="button"
-                        class="btn btn-outline"
-                        @click="editingScreening = null"
-                    >
-                        Cancelar</button
-                    ><button
-                        class="btn btn-outline"
-                        :disabled="screeningForm.processing"
-                    >
-                        Guardar requisitos
-                    </button>
-                    <button
-                        type="submit"
-                        value="external"
-                        class="btn btn-primary"
-                        :disabled="screeningForm.processing"
-                    >
-                        Guardar e ir a aspectos externos
-                    </button>
-                </div>
-            </form>
         </div>
         <div
             v-if="selectedVacancy"

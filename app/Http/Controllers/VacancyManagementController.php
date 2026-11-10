@@ -70,9 +70,10 @@ class VacancyManagementController extends Controller
             $this->lockDraft($vacancy->recruitment_call_id);
             $locked = Vacancy::lockForUpdate()->findOrFail($vacancy->id);
             $data = $request->safe()->except(['requirements', 'screening_rules']);
-            if ($locked->category !== $data['category'] && $locked->external_evaluation !== null) {
+            if ($locked->category !== $data['category'] && ($locked->external_evaluation !== null || $locked->internal_evaluation !== null)) {
                 $data['external_evaluation'] = null;
-                AuditEvent::record('ASPECTOS_EXTERNOS_REINICIADOS', $locked, ['from' => $locked->category, 'to' => $data['category']]);
+                $data['internal_evaluation'] = null;
+                AuditEvent::record('RUBRICAS_PLAZA_REINICIADAS', $locked, ['from' => $locked->category, 'to' => $data['category']]);
             }
             $locked->update($data);
             AuditEvent::record('FICHA_PLAZA_EDITADA', $locked);
@@ -160,7 +161,7 @@ class VacancyManagementController extends Controller
         return Inertia::render('VacancyForm', [
             'call' => $call?->only('id', 'code', 'title', 'modality', 'opens_at', 'closes_at'),
             'vacancy' => $vacancy,
-            'hasExternalEvaluation' => $vacancy?->external_evaluation !== null,
+            'hasEvaluation' => $vacancy?->external_evaluation !== null || $vacancy?->internal_evaluation !== null,
             'contractHours' => Vacancy::CONTRACT_HOURS,
             'faculties' => Vacancy::query()->distinct()->orderBy('faculty')->pluck('faculty'),
         ]);

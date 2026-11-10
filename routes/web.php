@@ -6,7 +6,7 @@ use App\Http\Controllers\ManagementController;
 use App\Http\Controllers\PortalController;
 use App\Http\Controllers\ProfileLookupController;
 use App\Http\Controllers\ReviewController;
-use App\Http\Controllers\VacancyExternalEvaluationController;
+use App\Http\Controllers\VacancyEvaluationController;
 use App\Http\Controllers\VacancyManagementController;
 use Illuminate\Support\Facades\Route;
 
@@ -71,8 +71,10 @@ Route::middleware('auth')->group(function () {
         Route::post('/convocatorias/{recruitmentCall}/cerrar-prueba', [ManagementController::class, 'closeDemo'])->name('management.demo.close');
         Route::post('/convocatorias/{recruitmentCall}/etapa', [ManagementController::class, 'transition'])->name('management.calls.transition');
         Route::put('/plazas/{vacancy}/formulario', [ManagementController::class, 'configureScreening'])->name('management.screening');
-        Route::get('/plazas/{vacancy}/aspectos-externos', [VacancyExternalEvaluationController::class, 'edit'])->name('management.vacancies.external.edit');
-        Route::put('/plazas/{vacancy}/aspectos-externos', [VacancyExternalEvaluationController::class, 'update'])->name('management.vacancies.external.update');
+        Route::get('/plazas/{vacancy}/aspectos-externos', [VacancyEvaluationController::class, 'edit'])->defaults('stage', 'external')->name('management.vacancies.external.edit');
+        Route::put('/plazas/{vacancy}/aspectos-externos', [VacancyEvaluationController::class, 'update'])->defaults('stage', 'external')->name('management.vacancies.external.update');
+        Route::get('/plazas/{vacancy}/aspectos-internos', [VacancyEvaluationController::class, 'edit'])->defaults('stage', 'internal')->name('management.vacancies.internal.edit');
+        Route::put('/plazas/{vacancy}/aspectos-internos', [VacancyEvaluationController::class, 'update'])->defaults('stage', 'internal')->name('management.vacancies.internal.update');
         Route::put('/plazas/{vacancy}/jurados', [ManagementController::class, 'assign'])->name('management.jurors');
         Route::get('/auditoria', [ManagementController::class, 'audit'])->name('audit');
     });

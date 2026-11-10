@@ -12,7 +12,7 @@ const props = defineProps({
     vacancy: Object,
     contractHours: Object,
     faculties: Array,
-    hasExternalEvaluation: Boolean,
+    hasEvaluation: Boolean,
 });
 const firstVacancy = computed(() => !props.call);
 const callPath = computed(() =>
@@ -154,13 +154,12 @@ function removeDocument() {
             >
             <p v-if="firstVacancy">
                 Al guardar esta ficha se crea la convocatoria en borrador. Luego
-                podrás adjuntar los PDF, añadir otras plazas y configurar los
-                requisitos.
+                podrás adjuntar los PDF, añadir otras plazas y configurar las
+                rúbricas de evaluación.
             </p>
             <p v-else>
-                Completa la ficha que verá el postulante. Los requisitos de
-                envío, filtros y evaluación se configuran después en la
-                convocatoria.
+                Completa la ficha que verá el postulante. Las rúbricas de
+                evaluación se configuran después de guardar la plaza.
             </p>
         </div>
 
@@ -615,36 +614,37 @@ function removeDocument() {
 
         <div v-if="vacancy" class="notice row between wrap">
             <div>
-                <strong>Siguiente paso · Requisitos y filtros</strong>
-                <p v-if="hasExternalEvaluation && form.category !== vacancy.category">
-                    Al guardar el cambio de categoría se reiniciarán los aspectos
-                    externos para cargar el mínimo que corresponde.
+                <strong>Siguiente paso · Rúbricas de evaluación</strong>
+                <p v-if="hasEvaluation && form.category !== vacancy.category">
+                    Al guardar el cambio de categoría se reiniciarán las
+                    rúbricas para cargar los mínimos que corresponden.
                 </p>
                 <p v-else-if="form.isDirty || attachment.file">
                     Guarda los cambios de la ficha o adjunta el PDF seleccionado
                     antes de continuar.
                 </p>
                 <p v-else>
-                    Define qué debe presentar el postulante y qué comprobaciones
-                    se aplicarán a esta plaza.
+                    Revisa los aspectos externos e internos de esta plaza.
                 </p>
             </div>
             <Link
                 v-if="
                     !form.isDirty && !attachment.file && !attachment.processing
                 "
-                :href="url(callPath + '?configurar=' + vacancy.id)"
+                :href="url(vacancyPath + '/aspectos-externos')"
                 class="btn btn-primary"
             >
-                Continuar a requisitos y filtros
+                Aspectos externos
                 <Icon name="ArrowRight" :size="17" />
             </Link>
             <Link
-                v-if="!form.isDirty && !attachment.file && !attachment.processing"
-                :href="url(vacancyPath + '/aspectos-externos')"
+                v-if="
+                    !form.isDirty && !attachment.file && !attachment.processing
+                "
+                :href="url(vacancyPath + '/aspectos-internos')"
                 class="btn btn-outline"
             >
-                Aspectos externos
+                Aspectos internos
             </Link>
         </div>
 
