@@ -85,6 +85,8 @@ function tied(rows, row) {
                                     <th>Código de expediente</th>
                                     <th>Estado</th>
                                     <template v-if="v.by_vacancy">
+                                        <th>Externa (55)</th>
+                                        <th>Interna (45)</th>
                                         <th>Puntaje final aprobatorio</th>
                                         <th>Resultado</th>
                                     </template>
@@ -107,13 +109,40 @@ function tied(rows, row) {
                                     <td class="mono">{{ r.reference }}</td>
                                     <td><Badge :value="r.status" /></td>
                                     <template v-if="v.by_vacancy">
+                                        <td>
+                                            {{ scoreText(r.outcome?.external) }}
+                                        </td>
+                                        <td>
+                                            {{ scoreText(r.outcome?.internal) }}
+                                        </td>
                                         <td>{{ scoreText(r.score) }}</td>
                                         <td>
-                                            {{
-                                                outcomeLabels[
-                                                    r.outcome?.stage
-                                                ] || "—"
-                                            }}<small v-if="tied(v.rows, r)"
+                                            <div class="row wrap gap-8">
+                                                <span
+                                                    v-if="r.winner"
+                                                    class="badge badge-apto"
+                                                    >Ganador</span
+                                                >
+                                                <span>{{
+                                                    outcomeLabels[
+                                                        r.outcome?.stage
+                                                    ] || "—"
+                                                }}</span>
+                                            </div>
+                                            <small
+                                                v-if="
+                                                    r.tie_breaker === 'doctor'
+                                                "
+                                                >Desempate dirimido por Grado de
+                                                Doctor</small
+                                            >
+                                            <small
+                                                v-else-if="
+                                                    r.tie_breaker ===
+                                                        'pending' ||
+                                                    (!r.tie_breaker &&
+                                                        tied(v.rows, r))
+                                                "
                                                 >Empate pendiente de resolución
                                                 por la comisión</small
                                             >

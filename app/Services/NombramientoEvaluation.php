@@ -153,9 +153,30 @@ class NombramientoEvaluation
                 ? round($total * ($application->vacancy->external_evaluation['disability_bonus']['percent'] ?? 0) / 100, 3) : 0;
             $outcome['bonus'] = $bonus;
             $outcome['final'] = $outcome['passed'] ? round($total + $bonus, 3) : null;
+            $outcome['has_doctor'] = self::hasAccreditedDoctor($application);
         }
         $application->update(['status' => 'EVALUADA', 'evaluation_outcome' => $outcome]);
         AuditEvent::record('EVALUACION_CONSOLIDADA', $application, $outcome);
+    }
+
+    public static function hasAccreditedDoctor(Application $application): bool
+    {
+        $validatedMerits = $application->external_evaluation['merits'] ?? [];
+        foreach (VacancyEvaluationWorkflow::evidence($application) as $entry) {
+            if (($entry['criterion'] ?? null) === 'formacion:doctor' && ($validatedMerits[$entry['id']] ?? 0) > 0) {
+                return true;
+            }
+        }
+
+        foreach ($application->form_data['credentials'] ?? [] as $credential) {
+            if (($credential['kind'] ?? null) === 'doctor' && ! empty($credential['id'])) {
+                if ($application->documents()->where('requirement_key', 'acad_'.$credential['id'])->where('review_status', 'CUMPLE')->exists()) {
+                    return true;
+                }
+            }
+        }
+
+        return ($application->form_data['degree'] ?? null) === 'doctor';
     }
 
     private function scoreInternalItems(array $submitted, array $criteria): array

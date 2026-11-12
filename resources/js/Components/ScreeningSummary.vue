@@ -71,6 +71,11 @@ defineProps({
                     {{ report.training_points }}</small
                 >
             </div>
+            <div v-else-if="report.academic_points > 0">
+                <small>Formación profesional (Anexo 01)</small
+                ><b>{{ Number(report.academic_points).toFixed(3) }} pts</b
+                ><small>Grado mayor + título profesional</small>
+            </div>
         </div>
     </section>
 </template>

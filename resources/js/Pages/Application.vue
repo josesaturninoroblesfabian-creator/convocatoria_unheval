@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { Link, useForm } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
@@ -31,6 +31,144 @@ const merits = useForm({
         ...entry,
     })),
 });
+watch(
+    () => props.application.form_data?.merits,
+    (updated) => {
+        if (!merits.isDirty && Array.isArray(updated)) {
+            merits.merits = updated.map((entry) => ({ ...entry }));
+        }
+    },
+);
+const groupedMeritCriteria = computed(() => {
+    const groups = new Map();
+    for (const [key, criterion] of Object.entries(props.meritCriteria ?? {})) {
+        if (!groups.has(criterion.rubric)) {
+            groups.set(criterion.rubric, {
+                key: criterion.rubric,
+                name: criterion.rubric_name,
+                max: criterion.rubric_max,
+                items: [],
+            });
+        }
+        groups.get(criterion.rubric).items.push({ key, ...criterion });
+    }
+    return Array.from(groups.values());
+});
+const declaredExternalSummary = computed(() => {
+    if (!props.evaluationStatus || !groupedMeritCriteria.value.length) {
+        return null;
+    }
+    const byRubric = [];
+    let total = 0;
+    for (const group of groupedMeritCriteria.value) {
+        let sum = 0;
+        const exclusive = {};
+        for (const entry of merits.merits) {
+            const criterion = props.meritCriteria?.[entry.criterion];
+            if (!criterion || criterion.rubric !== group.key) continue;
+            const qty = Math.max(0, Number(entry.quantity || 0));
+            if (
+                [
+                    "Grado más alto",
+                    "Un solo título",
+                    "Categoría más alta",
+                ].includes(criterion.unit)
+            ) {
+                exclusive[criterion.unit] = Math.max(
+                    exclusive[criterion.unit] ?? 0,
+                    qty > 0 ? Number(criterion.points) : 0,
+                );
+            } else {
+                sum += qty * Number(criterion.points);
+            }
+        }
+        const subtotal = Math.min(
+            Number(group.max ?? 55),
+            Math.round(
+                (sum +
+                    Object.values(exclusive).reduce(
+                        (acc, val) => acc + val,
+                        0,
+                    )) *
+                    100,
+            ) / 100,
+        );
+        if (subtotal > 0) {
+            byRubric.push({
+                key: group.key,
+                name: group.name,
+                subtotal,
+                max: group.max,
+            });
+        }
+        total += subtotal;
+    }
+    total = Math.round(total * 100) / 100;
+    const minimum = Number(props.evaluationStatus.externalMinimum ?? 0);
+    return {
+        total,
+        maximum: Number(props.evaluationStatus.externalMaximum ?? 55),
+        minimum,
+        passedMinimum: total >= minimum,
+        byRubric,
+    };
+});
+const canSyncFromStepOne = computed(() =>
+    Boolean(
+        props.application.form_data?.credentials?.length ||
+            props.application.form_data?.experience?.length,
+    ),
+);
+function syncFromStepOne() {
+    const fd = props.application.form_data ?? {};
+    const credMap = {
+        doctor: "formacion:doctor",
+        maestro: "formacion:maestro",
+        bachiller: "formacion:bachiller",
+        titulo: "formacion:titulo",
+        segunda_especialidad: "formacion_servicio:especialidad",
+    };
+    const existingReuse = new Set(
+        merits.merits.map((m) => m.reuse).filter(Boolean),
+    );
+    for (const credential of fd.credentials ?? []) {
+        const criterion = credMap[credential.kind];
+        const reuse = "acad_" + credential.id;
+        if (
+            criterion &&
+            props.meritCriteria?.[criterion] &&
+            !existingReuse.has(reuse)
+        ) {
+            merits.merits.push({
+                id: screeningRecordId(),
+                criterion,
+                description:
+                    `${credential.name} · ${credential.institution}`.trim(),
+                quantity: 1,
+                reuse,
+            });
+            existingReuse.add(reuse);
+        }
+    }
+    for (const period of fd.experience ?? []) {
+        const reuse = "exp_" + period.id;
+        const criterion =
+            period.type === "docente"
+                ? "experiencia_universitaria:docente"
+                : "experiencia_extrauniversitaria:anio";
+        if (props.meritCriteria?.[criterion] && !existingReuse.has(reuse)) {
+            merits.merits.push({
+                id: screeningRecordId(),
+                criterion,
+                description:
+                    `${period.position} · ${period.institution}`.trim(),
+                quantity: 1,
+                reuse,
+            });
+            existingReuse.add(reuse);
+        }
+    }
+}
 const aptitudeDocuments = computed(() =>
     props.documentRequirements.filter(
         (item) =>
@@ -243,13 +381,67 @@ function submit() {
                         v-if="editable && evaluationStatus"
                         @submit.prevent="saveMerits"
                     >
-                        <h2>Declara tus méritos</h2>
+                        <div class="row between wrap">
+                            <h2>
+                                Declara tus méritos (Anexo 01 · Aspectos
+                                Externos)
+                            </h2>
+                            <button
+                                v-if="canSyncFromStepOne"
+                                type="button"
+                                class="btn btn-outline btn-sm"
+                                @click="syncFromStepOne"
+                            >
+                                Importar grados y experiencia del Paso 1
+                            </button>
+                        </div>
                         <p>
-                            Selecciona el criterio, describe el mérito e indica
-                            la cantidad en la unidad solicitada. Guarda la lista
-                            para adjuntar los PDF o reutiliza un sustento de
-                            aptitud.
+                            Selecciona el rubro del Anexo 01, describe el mérito
+                            e indica la cantidad en la unidad solicitada. Guarda
+                            la lista para adjuntar los PDF o reutiliza una
+                            credencial ya cargada.
                         </p>
+                        <div v-if="declaredExternalSummary" class="notice">
+                            <div class="row between wrap">
+                                <strong
+                                    >Puntaje preliminar declarado (Anexo 01):
+                                    {{
+                                        declaredExternalSummary.total.toFixed(2)
+                                    }}
+                                    /
+                                    {{ declaredExternalSummary.maximum }}
+                                    pts</strong
+                                >
+                                <span
+                                    v-if="declaredExternalSummary.minimum"
+                                    class="badge"
+                                    :class="
+                                        declaredExternalSummary.passedMinimum
+                                            ? 'badge-apto'
+                                            : 'badge-no_apto'
+                                    "
+                                >
+                                    {{
+                                        declaredExternalSummary.passedMinimum
+                                            ? `Alcanza el mínimo externo (${declaredExternalSummary.minimum} pts)`
+                                            : `Mínimo externo requerido: ${declaredExternalSummary.minimum} pts`
+                                    }}
+                                </span>
+                            </div>
+                            <p
+                                v-if="declaredExternalSummary.byRubric.length"
+                                class="muted"
+                            >
+                                {{
+                                    declaredExternalSummary.byRubric
+                                        .map(
+                                            (r) =>
+                                                `${r.name}: ${r.subtotal} / ${r.max} pts`,
+                                        )
+                                        .join(" · ")
+                                }}
+                            </p>
+                        </div>
                         <Errors :errors="merits.errors" />
                         <div
                             v-for="(merit, index) in merits.merits"
@@ -257,23 +449,27 @@ function submit() {
                             class="entry-card"
                         >
                             <label
-                                >Criterio
+                                >Criterio del Anexo 01
                                 <select v-model="merit.criterion" required>
                                     <option value="" disabled>
                                         Selecciona un criterio
                                     </option>
-                                    <option
-                                        v-for="(
-                                            criterion, key
-                                        ) in meritCriteria"
-                                        :key="key"
-                                        :value="key"
+                                    <optgroup
+                                        v-for="group in groupedMeritCriteria"
+                                        :key="group.key"
+                                        :label="`${group.name} (Máx. ${group.max} pts)`"
                                     >
-                                        {{ criterion.rubric_name }} ·
-                                        {{ criterion.name }} ({{
-                                            criterion.unit
-                                        }})
-                                    </option>
+                                        <option
+                                            v-for="criterion in group.items"
+                                            :key="criterion.key"
+                                            :value="criterion.key"
+                                        >
+                                            {{ criterion.name }} ·
+                                            {{ criterion.points }} pts ({{
+                                                criterion.unit
+                                            }})
+                                        </option>
+                                    </optgroup>
                                 </select>
                             </label>
                             <label

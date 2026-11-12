@@ -33,6 +33,18 @@ function addField() {
         requires_document: true,
     });
 }
+function addColegiaturaField() {
+    if (model.value.fields.some((f) => f.key === "colegiatura")) return;
+    model.value.fields.push({
+        key: "colegiatura",
+        label: "Colegiatura profesional vigente y habilitada",
+        type: "select",
+        required: true,
+        options: ["Sí, habilitado", "No habilitado"],
+        expected_value: "Sí, habilitado",
+        requires_document: true,
+    });
+}
 </script>
 <template>
     <div class="screening-editor">
@@ -66,7 +78,16 @@ function addField() {
                         <option value="doctor">Doctor</option>
                     </select></label
                 ><label
-                    >Experiencia mínima (meses)<input
+                    >Experiencia mínima (meses)
+                    <small
+                        >{{
+                            (
+                                Number(model.minimum_experience_months || 0) /
+                                12
+                            ).toFixed(1)
+                        }}
+                        años</small
+                    ><input
                         v-model.number="model.minimum_experience_months"
                         type="number"
                         min="0"
@@ -214,13 +235,23 @@ function addField() {
                     </button>
                 </div>
             </div>
-            <button
-                type="button"
-                class="btn btn-outline btn-sm"
-                @click="addField"
-            >
-                Añadir pregunta
-            </button></template
+            <div class="row wrap">
+                <button
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    @click="addField"
+                >
+                    Añadir pregunta
+                </button>
+                <button
+                    v-if="!model.fields.some((f) => f.key === 'colegiatura')"
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    @click="addColegiaturaField"
+                >
+                    Exigir colegiatura habilitada
+                </button>
+            </div></template
         >
     </div>
 </template>

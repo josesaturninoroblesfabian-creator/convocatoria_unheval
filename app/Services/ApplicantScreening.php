@@ -18,7 +18,7 @@ class ApplicantScreening
             return $application->screening_snapshot;
         }
         $rules = $application->vacancy->screening_rules;
-        if (VacancyEvaluationWorkflow::configured($application->vacancy) || ! ($rules['enabled'] ?? false)) {
+        if (! ($rules['enabled'] ?? false)) {
             return ['enabled' => false, 'eligible' => true, 'issues' => [], 'checks' => [], 'total' => 0];
         }
         $cutoff = CarbonImmutable::today()->min(CarbonImmutable::parse($application->recruitmentCall->closes_at)->startOfDay());
@@ -62,7 +62,11 @@ class ApplicantScreening
 
         $checks[] = ['label' => 'Título profesional declarado', 'passed' => $hasTitle];
         $requiredDegree = $rules['minimum_degree'];
-        $checks[] = ['label' => 'Grado académico mínimo: '.$this->degreeLabel($requiredDegree), 'passed' => $degreeLevel >= (self::DEGREES[$requiredDegree] ?? 1)];
+        $requiredLevel = self::DEGREES[$requiredDegree] ?? 1;
+        $doctorNote = $degreeLevel === self::CREDENTIAL_LEVELS['doctor'] && $degreeLevel > $requiredLevel
+            ? ' (acredita Doctor · '.($rules['degree_points']['doctor'] ?? 8).' pts)'
+            : '';
+        $checks[] = ['label' => 'Grado académico mínimo: '.$this->degreeLabel($requiredDegree).$doctorNote, 'passed' => $degreeLevel >= $requiredLevel];
         $bachelor = $bachelorDate ? CarbonImmutable::parse($bachelorDate)->startOfDay() : null;
         if ($rules['count_from_bachelor']) {
             $checks[] = ['label' => 'Fecha de obtención del bachiller registrada', 'passed' => $bachelor !== null && $bachelor->lte($cutoff)];
@@ -168,55 +172,55 @@ class ApplicantScreening
     public function documents(Application $application): array
     {
         $requirements = $application->vacancy->requirements;
-        if (VacancyEvaluationWorkflow::configured($application->vacancy)) {
+        $byVacancy = VacancyEvaluationWorkflow::configured($application->vacancy);
+        if ($byVacancy) {
             $requirements = array_map(fn (array $requirement): array => $requirement['key'] === 'silabo_interno'
                 ? [...$requirement, 'required_for_aptitude' => false] : $requirement, $requirements);
+        }
+        if ($application->vacancy->screening_rules['enabled'] ?? false) {
+            $data = $application->form_data ?? [];
+            if ($application->vacancy->screening_rules['academic_credentials'] ?? false) {
+                $requirements = array_values(array_filter($requirements, fn ($item) => ! in_array($item['key'], ['titulo', 'grado', 'bachiller'], true)));
+                foreach ($data['credentials'] ?? [] as $credential) {
+                    $requirements[] = [
+                        'key' => 'acad_'.$credential['id'],
+                        'label' => $this->degreeLabel($credential['kind']).': '.$credential['name'].' · '.$credential['institution'],
+                        'required' => true,
+                        'required_for_aptitude' => false,
+                    ];
+                }
+            } else {
+                $keys = array_column($requirements, 'key');
+                if (! in_array('titulo', $keys, true)) {
+                    $requirements[] = ['key' => 'titulo', 'label' => 'Título profesional declarado', 'required' => true];
+                }
+                if (in_array($data['degree'] ?? '', ['maestro', 'doctor'], true) && ! in_array('grado', $keys, true)) {
+                    $requirements[] = ['key' => 'grado', 'label' => 'Sustento del grado académico declarado', 'required' => true];
+                }
+                if ($application->vacancy->screening_rules['count_from_bachelor'] && ! in_array('bachiller', $keys, true)) {
+                    $requirements[] = ['key' => 'bachiller', 'label' => 'Grado de bachiller con fecha de obtención', 'required' => true];
+                }
+            }
+            if (! empty($data['experience'])) {
+                $requirements = array_values(array_filter($requirements, fn ($item) => $item['key'] !== 'experiencia'));
+            }
+            foreach ($data['experience'] ?? [] as $period) {
+                $requirements[] = ['key' => 'exp_'.$period['id'], 'label' => 'Sustento de experiencia: '.$period['institution'].' · '.$period['start_date'].' a '.($period['end_date'] ?? 'la actualidad'), 'required' => true];
+            }
+            foreach ($data['training'] ?? [] as $course) {
+                $requirements[] = ['key' => 'cap_'.$course['id'], 'label' => 'Certificado: '.$course['name'].' · '.$course['hours'].' horas', 'required' => true];
+            }
+            foreach ($application->vacancy->screening_rules['fields'] ?? [] as $field) {
+                if (($field['requires_document'] ?? false) && ($data['answers'][$field['key']] ?? '') !== '') {
+                    $requirements[] = ['key' => 'campo_'.$field['key'], 'label' => 'Sustento: '.$field['label'], 'required' => true];
+                }
+            }
+        }
+        if ($byVacancy) {
             foreach (VacancyEvaluationWorkflow::evidence($application) as $merit) {
                 if (empty($merit['reuse'])) {
                     $requirements[] = ['key' => 'merito_'.$merit['id'], 'label' => 'Mérito: '.$merit['description'], 'required' => true, 'required_for_aptitude' => false];
                 }
-            }
-
-            return $requirements;
-        }
-        if (! ($application->vacancy->screening_rules['enabled'] ?? false)) {
-            return $requirements;
-        }
-        $data = $application->form_data ?? [];
-        if ($application->vacancy->screening_rules['academic_credentials'] ?? false) {
-            $requirements = array_values(array_filter($requirements, fn ($item) => ! in_array($item['key'], ['titulo', 'grado', 'bachiller'], true)));
-            foreach ($data['credentials'] ?? [] as $credential) {
-                $requirements[] = [
-                    'key' => 'acad_'.$credential['id'],
-                    'label' => $this->degreeLabel($credential['kind']).': '.$credential['name'].' · '.$credential['institution'],
-                    'required' => true,
-                    'required_for_aptitude' => false,
-                ];
-            }
-        } else {
-            $keys = array_column($requirements, 'key');
-            if (! in_array('titulo', $keys, true)) {
-                $requirements[] = ['key' => 'titulo', 'label' => 'Título profesional declarado', 'required' => true];
-            }
-            if (in_array($data['degree'] ?? '', ['maestro', 'doctor'], true) && ! in_array('grado', $keys, true)) {
-                $requirements[] = ['key' => 'grado', 'label' => 'Sustento del grado académico declarado', 'required' => true];
-            }
-            if ($application->vacancy->screening_rules['count_from_bachelor'] && ! in_array('bachiller', $keys, true)) {
-                $requirements[] = ['key' => 'bachiller', 'label' => 'Grado de bachiller con fecha de obtención', 'required' => true];
-            }
-        }
-        if (! empty($data['experience'])) {
-            $requirements = array_values(array_filter($requirements, fn ($item) => $item['key'] !== 'experiencia'));
-        }
-        foreach ($data['experience'] ?? [] as $period) {
-            $requirements[] = ['key' => 'exp_'.$period['id'], 'label' => 'Sustento de experiencia: '.$period['institution'].' · '.$period['start_date'].' a '.($period['end_date'] ?? 'la actualidad'), 'required' => true];
-        }
-        foreach ($data['training'] ?? [] as $course) {
-            $requirements[] = ['key' => 'cap_'.$course['id'], 'label' => 'Certificado: '.$course['name'].' · '.$course['hours'].' horas', 'required' => true];
-        }
-        foreach ($application->vacancy->screening_rules['fields'] ?? [] as $field) {
-            if (($field['requires_document'] ?? false) && ($data['answers'][$field['key']] ?? '') !== '') {
-                $requirements[] = ['key' => 'campo_'.$field['key'], 'label' => 'Sustento: '.$field['label'], 'required' => true];
             }
         }
 

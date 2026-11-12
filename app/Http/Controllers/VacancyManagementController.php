@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ConfigureScreeningRequest;
 use App\Http\Requests\StoreVacancyRequest;
 use App\Models\Application;
 use App\Models\AuditEvent;
@@ -96,6 +97,7 @@ class VacancyManagementController extends Controller
     public function aptitude(Request $request, Vacancy $vacancy): RedirectResponse
     {
         $data = $request->validate([
+            ...ConfigureScreeningRequest::configurationRules(),
             ...StoreVacancyRequest::requirementRules(),
             'requirements' => ['present', 'array', 'list', 'max:30'],
             'requirements.*.key' => ['required', 'alpha_dash:ascii', 'distinct', 'max:40', 'not_regex:/^merito_/'],
@@ -105,13 +107,26 @@ class VacancyManagementController extends Controller
                 throw ValidationException::withMessages(["requirements.$index.required" => 'El sustento de bonificación es opcional.']);
             }
         }
+        foreach ($data['screening_rules']['fields'] ?? [] as $index => $field) {
+            if ($field['type'] === 'select') {
+                if (! $field['options']) {
+                    throw ValidationException::withMessages(["screening_rules.fields.$index.options" => 'Añade al menos una opción para la pregunta de selección.']);
+                }
+                if (($field['expected_value'] ?? '') !== '' && ! in_array($field['expected_value'], $field['options'], true)) {
+                    throw ValidationException::withMessages(["screening_rules.fields.$index.expected_value" => 'La respuesta exigida debe pertenecer a las opciones disponibles.']);
+                }
+            }
+        }
         DB::transaction(function () use ($vacancy, $data): void {
             $this->lockDraft($vacancy->recruitment_call_id);
+            if (array_key_exists('screening_rules', $data) && ! ($data['screening_rules']['enabled'] ?? false) && $vacancy->screening_rules === null) {
+                unset($data['screening_rules']);
+            }
             $vacancy->update($data);
             AuditEvent::record('REQUISITOS_APTITUD_CONFIGURADOS', $vacancy);
         });
 
-        return back()->with('success', 'Lista de sustentos de aptitud guardada.');
+        return back()->with('success', 'Lista de sustentos y filtro de aptitud guardados.');
     }
 
     public function reschedule(Request $request, Vacancy $vacancy): RedirectResponse

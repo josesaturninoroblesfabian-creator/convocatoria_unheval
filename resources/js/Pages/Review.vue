@@ -102,6 +102,31 @@ const academicRequirements = computed(() =>
         ["titulo", "grado", "bachiller"].includes(requirement.key),
     ),
 );
+const hasStructuredFormData = computed(() => {
+    const fd = props.application.form_data;
+    if (!fd) return false;
+    return Boolean(
+        fd.credentials?.length ||
+            fd.professional_title ||
+            fd.degree ||
+            fd.bachelor_date ||
+            fd.experience?.length ||
+            fd.training?.length ||
+            (fd.answers && Object.keys(fd.answers).length),
+    );
+});
+function markAllDocumentsCompliant() {
+    for (const d of props.application.documents) {
+        eligibility.documents[d.id] = "CUMPLE";
+    }
+    if (usesCredentials.value) {
+        eligibility.academic_profile_confirmed = true;
+    }
+    if (!eligibility.notes) {
+        eligibility.notes =
+            "Credenciales base y sustentos del Fólder A verificados conforme al perfil.";
+    }
+}
 const calculatedScreening = computed(
     () =>
         props.verifiedScreening ??
@@ -196,7 +221,7 @@ function grade() {
             :show-points="!evaluationTemplate"
             verified
         />
-        <section v-if="application.form_data" class="panel">
+        <section v-if="hasStructuredFormData" class="panel">
             <h3>Datos declarados y sustentos a comprobar</h3>
             <template v-if="application.form_data.credentials?.length">
                 <template v-if="academicRequirements.length">
@@ -334,6 +359,14 @@ function grade() {
                             queda como no apto.
                         </template>
                     </p>
+                    <button
+                        v-if="canWrite && application.documents.length"
+                        type="button"
+                        class="btn btn-outline btn-sm full"
+                        @click="markAllDocumentsCompliant"
+                    >
+                        Marcar todos los sustentos como Cumple
+                    </button>
                     <div
                         v-for="r in documentRequirements"
                         :key="r.key"

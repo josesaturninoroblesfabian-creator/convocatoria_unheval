@@ -29,7 +29,10 @@ class ReviewController extends Controller
         $requirements = $screening->documents($application);
         $progress = $nombramiento->progress($application, $request->user());
         if ($byVacancy && in_array($application->status, ['RECIBIDA', 'NO_APTO'], true)) {
-            $requirements = array_values(array_filter($requirements, fn (array $requirement): bool => $requirement['required_for_aptitude'] ?? true));
+            $requirements = array_values(array_filter(
+                $requirements,
+                fn (array $requirement): bool => $requirement['key'] !== 'silabo_interno' && ! str_starts_with($requirement['key'], 'merito_'),
+            ));
             $application->setRelation('documents', $application->documents->whereIn('requirement_key', array_column($requirements, 'key'))->values());
         }
         if ($byVacancy && ! VacancyEvaluationWorkflow::externalPassed($application)) {
@@ -64,13 +67,13 @@ class ReviewController extends Controller
             $locked->load('vacancy', 'documents');
             $byVacancy = VacancyEvaluationWorkflow::configured($locked->vacancy);
             abort_unless(VacancyEvaluationWorkflow::phaseOpen($locked->vacancy, 'aptitude'), 409, 'La ventana de aptitud está cerrada.');
-            $usesCredentials = ! $byVacancy && ($locked->vacancy->screening_rules['academic_credentials'] ?? false);
+            $usesCredentials = (bool) (($locked->vacancy->screening_rules['enabled'] ?? false) && ($locked->vacancy->screening_rules['academic_credentials'] ?? false));
             if ($usesCredentials && ! array_key_exists('academic_profile_confirmed', $data)) {
                 throw ValidationException::withMessages(['academic_profile_confirmed' => 'Indica si los sustentos acreditan el perfil académico de la plaza.']);
             }
             $eligible = true;
             foreach ($screening->documents($locked) as $requirement) {
-                if ($byVacancy && ! ($requirement['required_for_aptitude'] ?? true)) {
+                if ($byVacancy && ($requirement['key'] === 'silabo_interno' || str_starts_with($requirement['key'], 'merito_'))) {
                     continue;
                 }
                 $requiredForAptitude = $requirement['required_for_aptitude'] ?? $requirement['required'];

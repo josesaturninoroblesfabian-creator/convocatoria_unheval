@@ -72,23 +72,68 @@ class PortalController extends Controller
             'is_demo' => $call->is_demo,
             'evaluation_mode' => $call->evaluation_mode,
             'published_at' => $call->results_published_at,
-            'vacancies' => $call->vacancies->map(fn ($vacancy) => [
-                'school' => $vacancy->school,
-                'airhsp' => $vacancy->airhsp,
-                'by_vacancy' => VacancyEvaluationWorkflow::configured($vacancy),
-                'rows' => $vacancy->applications->map(fn ($application) => [
+            'vacancies' => $call->vacancies->map(function ($vacancy) use ($call) {
+                $byVacancy = VacancyEvaluationWorkflow::configured($vacancy);
+                $rows = $vacancy->applications->map(fn ($application) => [
                     'reference' => $application->reference,
                     'status' => $application->status,
-                    'outcome' => VacancyEvaluationWorkflow::configured($vacancy)
-                        ? ['stage' => $application->evaluation_outcome['stage'] ?? null]
+                    'outcome' => $byVacancy
+                        ? [
+                            'stage' => $application->evaluation_outcome['stage'] ?? null,
+                            'external' => $application->evaluation_outcome['external'] ?? null,
+                            'internal' => $application->evaluation_outcome['internal'] ?? null,
+                            'total' => $application->evaluation_outcome['total'] ?? null,
+                            'has_doctor' => (bool) ($application->evaluation_outcome['has_doctor'] ?? false),
+                        ]
                         : $application->evaluation_outcome,
-                    'score' => VacancyEvaluationWorkflow::configured($vacancy)
+                    'score' => $byVacancy
                         ? ($application->evaluation_outcome['final'] ?? null)
                         : ($call->evaluation_template
                         ? ($application->evaluation_outcome['total'] ?? null)
                         : ($application->status === 'EVALUADA' ? round((float) $application->evaluations->avg('total'), 3) : null)),
-                ])->sortByDesc('score')->values(),
-            ]),
+                ])->sort(function (array $a, array $b): int {
+                    $scoreCompare = ($b['score'] ?? -1) <=> ($a['score'] ?? -1);
+                    if ($scoreCompare !== 0) {
+                        return $scoreCompare;
+                    }
+
+                    return ((int) ($b['outcome']['has_doctor'] ?? false)) <=> ((int) ($a['outcome']['has_doctor'] ?? false));
+                })->values();
+
+                $qualifying = $rows->filter(fn (array $row): bool => $row['score'] !== null && (! $byVacancy || ($row['outcome']['stage'] ?? null) === 'SUPERA_MINIMOS'));
+                $topScore = $qualifying->max('score');
+                $topTied = $topScore !== null ? $qualifying->filter(fn (array $row): bool => $row['score'] === $topScore) : collect();
+                $doctorWinners = $topTied->filter(fn (array $row): bool => (bool) ($row['outcome']['has_doctor'] ?? false));
+
+                $rows = $rows->map(function (array $row) use ($topScore, $topTied, $doctorWinners): array {
+                    $isTop = $topScore !== null && $row['score'] === $topScore;
+                    $winner = false;
+                    $tieBreaker = null;
+                    if ($isTop) {
+                        if ($topTied->count() === 1) {
+                            $winner = true;
+                        } elseif ($doctorWinners->count() === 1) {
+                            $winner = (bool) ($row['outcome']['has_doctor'] ?? false);
+                            $tieBreaker = 'doctor';
+                        } else {
+                            $tieBreaker = 'pending';
+                        }
+                    }
+
+                    return [
+                        ...$row,
+                        'winner' => $winner,
+                        'tie_breaker' => $tieBreaker,
+                    ];
+                })->all();
+
+                return [
+                    'school' => $vacancy->school,
+                    'airhsp' => $vacancy->airhsp,
+                    'by_vacancy' => $byVacancy,
+                    'rows' => $rows,
+                ];
+            }),
         ]);
 
         return Inertia::render('Results', ['calls' => $data]);

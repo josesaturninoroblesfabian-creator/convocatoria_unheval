@@ -276,22 +276,40 @@ function saveJury() {
                 </div>
                 <details v-if="reviewed[v.id]?.length">
                     <summary>
-                        Revisar resultados consolidados antes de publicar
+                        Cuadro de méritos y resultados consolidados
                     </summary>
                     <div
                         class="schedule-row"
                         v-for="row in reviewed[v.id]"
                         :key="row.id"
                     >
-                        <Link
-                            :href="url('/expedientes/' + row.id)"
-                            class="text-link"
-                            >{{ row.reference }}</Link
-                        >
-                        <span
-                            >{{ resultLabels[row.result] }} ·
-                            {{ row.score ?? "Sin puntaje aprobatorio" }}</span
-                        >
+                        <div class="row wrap gap-8">
+                            <Link
+                                :href="url('/expedientes/' + row.id)"
+                                class="text-link"
+                                >{{ row.reference }}</Link
+                            >
+                            <span v-if="row.winner" class="badge badge-apto"
+                                >Ganador</span
+                            >
+                        </div>
+                        <span>
+                            {{ resultLabels[row.result] }} ·
+                            <template v-if="row.external != null">
+                                Ext. {{ row.external }}
+                            </template>
+                            <template v-if="row.internal != null">
+                                + Int. {{ row.internal }}
+                            </template>
+                            <template v-if="row.bonus > 0">
+                                + Bonif. CONADIS 15% ({{ row.bonus }})
+                            </template>
+                            ·
+                            <b>{{ row.score ?? "Sin puntaje aprobatorio" }}</b>
+                            <small v-if="row.tie_breaker === 'doctor'">
+                                (Desempate por Grado de Doctor)</small
+                            >
+                        </span>
                     </div>
                 </details>
                 <button

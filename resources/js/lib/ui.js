@@ -24,6 +24,7 @@ export const labels = {
     APTO: "Apto",
     NO_APTO: "No apto",
     EVALUADA: "Evaluada",
+    GANADOR: "Ganador",
     NOMBRAMIENTO: "Nombramiento",
     CONTRATO: "Contrato",
     AUXILIAR: "Auxiliar",

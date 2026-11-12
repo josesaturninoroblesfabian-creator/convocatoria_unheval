@@ -119,6 +119,11 @@ const documentFor = (entry) =>
         (document) =>
             document.requirement_key === (entry.reuse || "merito_" + entry.id),
     );
+const syllabusDocument = computed(() =>
+    props.documents?.find(
+        (document) => document.requirement_key === "silabo_interno",
+    ),
+);
 const scale = (criterion, item) =>
     item.levels ?? criterion.scale.map((value) => ({ points: value }));
 const draftTotal = computed(() =>
@@ -152,6 +157,14 @@ function startAdjustment() {
     form.notes = "";
     form.clearErrors();
     adjustmentRevision.value = proposal.value.revision;
+}
+
+function approveAllDeclaredMerits() {
+    for (const entry of props.merits) {
+        const doc = documentFor(entry);
+        form.merits[entry.id] =
+            doc?.review_status === "NO_CUMPLE" ? 0 : entry.quantity;
+    }
 }
 
 function cancelAdjustment() {
@@ -265,7 +278,15 @@ function refresh() {
                     Interna {{ points.format(outcome.internal) }}.
                 </template>
                 <template v-if="outcome.total != null">
-                    Total {{ points.format(outcome.total) }}.
+                    Subtotal {{ points.format(outcome.total) }}.
+                </template>
+                <template v-if="outcome.bonus > 0">
+                    Bonificación CONADIS (15%) +{{
+                        points.format(outcome.bonus)
+                    }}.
+                </template>
+                <template v-if="outcome.final != null">
+                    Puntaje final {{ points.format(outcome.final) }}.
                 </template>
             </p>
         </div>
@@ -323,14 +344,73 @@ function refresh() {
         <Errors :errors="form.errors" />
         <form @submit.prevent="reviewSubmission">
             <div v-if="byVacancy && phase === 'EXTERNA'" class="notice">
-                <strong
-                    >Validado en la hoja
-                    {{ points.format(externalTotals[0]) }} puntos</strong
-                >
+                <div class="row between wrap">
+                    <strong
+                        >Validado en la hoja
+                        {{ points.format(externalTotals[0]) }} puntos</strong
+                    >
+                    <span
+                        v-if="minimums"
+                        class="badge"
+                        :class="
+                            externalTotals[0] >= minimums.external
+                                ? 'badge-apto'
+                                : 'badge-no_apto'
+                        "
+                    >
+                        {{
+                            externalTotals[0] >= minimums.external
+                                ? `Supera el mínimo externo (${points.format(minimums.external)} pts)`
+                                : `Mínimo eliminatorio: ${points.format(minimums.external)} pts`
+                        }}
+                    </span>
+                </div>
                 <p>
                     Máximo posible con los sustentos pendientes
-                    {{ points.format(externalTotals[1]) }} puntos. El pase se
-                    decide al cerrar la hoja con las conformidades.
+                    {{ points.format(externalTotals[1]) }} puntos. Quien no
+                    alcance el mínimo externo ({{
+                        points.format(minimums?.external ?? 0)
+                    }}
+                    pts) queda eliminado automáticamente en Etapa 2.
+                </p>
+                <button
+                    v-if="isEditing('EXTERNA') && merits.length"
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    @click="approveAllDeclaredMerits"
+                >
+                    Acreditar todas las cantidades declaradas
+                </button>
+            </div>
+            <div
+                v-if="phase === 'INTERNA' && isEditing('INTERNA')"
+                class="notice"
+            >
+                <div class="row between wrap">
+                    <strong
+                        >Mi puntaje interno en borrador:
+                        {{ points.format(draftTotal) }} / 45 puntos</strong
+                    >
+                    <span
+                        v-if="minimums"
+                        class="badge"
+                        :class="
+                            draftTotal >= minimums.internal
+                                ? 'badge-apto'
+                                : 'badge-no_apto'
+                        "
+                    >
+                        {{
+                            draftTotal >= minimums.internal
+                                ? `Supera el mínimo interno (${points.format(minimums.internal)} pts)`
+                                : `Mínimo interno requerido: ${points.format(minimums.internal)} pts`
+                        }}
+                    </span>
+                </div>
+                <p>
+                    Cada jurado califica por separado Sílabo (7.5 pts), Clase
+                    Modelo (25 pts) y Entrevista Personal (12.5 pts). El sistema
+                    promediará las tres calificaciones.
                 </p>
             </div>
             <details
@@ -394,6 +474,17 @@ function refresh() {
                         >
                             {{ criterion.guidance }}
                         </span>
+                        <button
+                            v-if="
+                                criterion.key === 'silabo' && syllabusDocument
+                            "
+                            type="button"
+                            class="text-link"
+                            @click="$emit('view-document', syllabusDocument.id)"
+                        >
+                            Ver sílabo adjunto en el visor
+                            <Icon name="Eye" :size="14" />
+                        </button>
                     </component>
                     <template v-if="criterion.items">
                         <div
@@ -470,8 +561,13 @@ function refresh() {
                             <strong>{{ entry.description }}</strong>
                             <p>
                                 {{ meritCriteria[entry.criterion].name }} ·
-                                {{ meritCriteria[entry.criterion].unit }} ·
-                                Cantidad declarada {{ entry.quantity }}
+                                {{
+                                    points.format(
+                                        meritCriteria[entry.criterion].points,
+                                    )
+                                }}
+                                pts ({{ meritCriteria[entry.criterion].unit }})
+                                · Cantidad declarada {{ entry.quantity }}
                             </p>
                             <button
                                 v-if="documentFor(entry)"

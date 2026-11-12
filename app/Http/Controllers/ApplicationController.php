@@ -74,6 +74,8 @@ class ApplicationController extends Controller
                 'calendar' => VacancyEvaluationWorkflow::windows($application->vacancy),
                 'advanced' => $application->submitted_at && isset($application->vacancy->stage_publications['external']) && VacancyEvaluationWorkflow::externalPassed($application),
                 'externalPublished' => isset($application->vacancy->stage_publications['external']),
+                'externalMinimum' => $application->vacancy->external_evaluation['minimum'] ?? null,
+                'externalMaximum' => $application->vacancy->external_evaluation['maximum'] ?? 55,
                 'result' => $application->recruitmentCall->results_published_at ? $application->evaluation_outcome : null,
             ] : null,
             'profileCredentials' => $application->status === 'BORRADOR'
@@ -109,8 +111,13 @@ class ApplicationController extends Controller
             $locked = Application::lockForUpdate()->findOrFail($application->id);
             $workflow->assertOpen($call);
             abort_unless($locked->status === 'BORRADOR', 409);
-            abort_unless(! VacancyEvaluationWorkflow::configured($locked->vacancy) && ($locked->vacancy->screening_rules['enabled'] ?? false), 409);
+            abort_unless($locked->vacancy->screening_rules['enabled'] ?? false, 409);
             $data = array_replace(['experience' => [], 'training' => [], 'answers' => []], $request->safe()->only(['degree', 'professional_title', 'bachelor_date', 'credentials', 'experience', 'training', 'answers']));
+            if (! empty($locked->form_data['merits'])) {
+                $data['merits'] = $locked->form_data['merits'];
+            } elseif (VacancyEvaluationWorkflow::configured($locked->vacancy)) {
+                $data['merits'] = VacancyEvaluationWorkflow::defaultMeritsFromFormData($locked->vacancy, $data);
+            }
             $previousCredentials = array_column($locked->form_data['credentials'] ?? [], null, 'id');
             $updatedCredentials = array_column($data['credentials'] ?? [], null, 'id');
             $allowedKeys = array_column($locked->vacancy->screening_rules['fields'] ?? [], 'key');
@@ -125,7 +132,10 @@ class ApplicationController extends Controller
             }
             $locked->update($updates);
             $report = $screening->assess($locked);
-            $locked->update(['declared_score' => $call->evaluation_template ? null : $report['total']]);
+            $declaredScore = VacancyEvaluationWorkflow::configured($locked->vacancy)
+                ? array_sum(VacancyEvaluationWorkflow::scores($locked))
+                : ($call->evaluation_template ? null : $report['total']);
+            $locked->update(['declared_score' => $declaredScore]);
             $allowedDocuments = array_column($screening->documents($locked), 'key');
             foreach ($previousCredentials as $id => $credential) {
                 if ($credential != ($updatedCredentials[$id] ?? null)) {
@@ -179,7 +189,7 @@ class ApplicationController extends Controller
         return back()->with('success', 'Documento guardado correctamente.');
     }
 
-    public function saveMerits(Request $request, Application $application, ApplicationWorkflow $workflow): RedirectResponse
+    public function saveMerits(Request $request, Application $application, ApplicationWorkflow $workflow, ApplicantScreening $screening): RedirectResponse
     {
         abort_unless($application->user_id === $request->user()->id, 404);
         $data = $request->validate([
@@ -189,16 +199,23 @@ class ApplicationController extends Controller
             'merits.*.criterion' => ['required', 'string', 'max:105'],
             'merits.*.quantity' => ['required', 'integer', 'between:1,1000'],
             'merits.*.description' => ['required', 'string', 'max:500'],
-            'merits.*.reuse' => ['nullable', 'string', 'max:40'],
+            'merits.*.reuse' => ['nullable', 'string', 'max:50'],
         ]);
 
-        DB::transaction(function () use ($application, $workflow, $data): void {
+        DB::transaction(function () use ($application, $workflow, $screening, $data): void {
             $call = RecruitmentCall::lockForUpdate()->findOrFail($application->recruitment_call_id);
             $locked = Application::lockForUpdate()->findOrFail($application->id);
             $workflow->assertOpen($call);
             abort_unless($locked->status === 'BORRADOR' && VacancyEvaluationWorkflow::configured($locked->vacancy), 409);
             $criteria = VacancyEvaluationWorkflow::criteria($locked->vacancy);
-            $requirements = array_diff(array_column($locked->vacancy->requirements, 'key'), ['bonificacion_discapacidad', 'silabo_interno']);
+            $stageOneKeys = array_filter(
+                array_column($screening->documents($locked), 'key'),
+                fn (string $key): bool => ! in_array($key, ['bonificacion_discapacidad', 'silabo_interno'], true) && ! str_starts_with($key, 'merito_'),
+            );
+            $requirements = array_values(array_unique([
+                ...array_diff(array_column($locked->vacancy->requirements, 'key'), ['bonificacion_discapacidad', 'silabo_interno']),
+                ...$stageOneKeys,
+            ]));
             foreach ($data['merits'] as $index => $entry) {
                 if (! isset($criteria[$entry['criterion']])) {
                     throw ValidationException::withMessages(["merits.$index.criterion" => 'Elige un criterio de esta plaza.']);
@@ -207,7 +224,12 @@ class ApplicationController extends Controller
                     throw ValidationException::withMessages(["merits.$index.reuse" => 'Elige un sustento de aptitud de esta plaza.']);
                 }
             }
-            $locked->update(['form_data' => [...($locked->form_data ?? []), 'merits' => $data['merits']]]);
+            $updatedFormData = [...($locked->form_data ?? []), 'merits' => $data['merits']];
+            $locked->fill(['form_data' => $updatedFormData]);
+            $locked->update([
+                'form_data' => $updatedFormData,
+                'declared_score' => array_sum(VacancyEvaluationWorkflow::scores($locked)),
+            ]);
             $keys = array_map(fn (array $entry): string => 'merito_'.$entry['id'], array_filter($data['merits'], fn (array $entry): bool => empty($entry['reuse'])));
             foreach ($locked->documents()->where('requirement_key', 'like', 'merito%')->whereNotIn('requirement_key', $keys)->get() as $document) {
                 if (str_starts_with($document->requirement_key, 'merito_')) {

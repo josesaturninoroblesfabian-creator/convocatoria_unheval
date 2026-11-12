@@ -4,8 +4,9 @@ import { Link, useForm } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Errors from "../Components/Errors.vue";
 import Icon from "../Components/Icon.vue";
+import ScreeningEditor from "../Components/ScreeningEditor.vue";
 import { date, label, url } from "../lib/ui";
-import { screeningRecordId } from "../lib/screening";
+import { defaultScreeningRules, screeningRecordId } from "../lib/screening";
 
 const props = defineProps({
     call: Object,
@@ -56,10 +57,32 @@ const rowKeys = {
     schedule: form.schedule.map(screeningRecordId),
 };
 const attachment = useForm({ name: "", file: null });
+const initialScreening = props.vacancy?.screening_rules;
 const aptitude = useForm({
     requirements: (props.vacancy?.requirements ?? []).map((item) => ({
         ...item,
     })),
+    screening_rules: initialScreening
+        ? {
+              ...defaultScreeningRules(),
+              ...initialScreening,
+              degree_points: {
+                  ...defaultScreeningRules().degree_points,
+                  ...(initialScreening.degree_points ?? {}),
+              },
+              fields: (initialScreening.fields ?? []).map((field) => ({
+                  ...field,
+                  options: [...(field.options ?? [])],
+              })),
+          }
+        : {
+              ...defaultScreeningRules(),
+              enabled: false,
+              minimum_degree:
+                  props.vacancy?.category === "PRINCIPAL"
+                      ? "doctor"
+                      : "maestro",
+          },
 });
 const bonusKey = "bonificacion_discapacidad";
 const syllabusKey = "silabo_interno";
@@ -76,6 +99,38 @@ function addSyllabus() {
         label: "Sílabo o planeación didáctica",
         required: false,
     });
+}
+function loadFolderABase() {
+    const base = [
+        {
+            key: "solicitud",
+            label: "Solicitud de inscripción y declaraciones juradas (Fólder A)",
+            required: true,
+        },
+        {
+            key: "habilitacion",
+            label: "Constancia de colegiatura y habilitación profesional vigente",
+            required: true,
+        },
+        {
+            key: bonusKey,
+            label: "Sustento de discapacidad para bonificación final",
+            required: false,
+        },
+        {
+            key: syllabusKey,
+            label: "Sílabo o planeación didáctica",
+            required: false,
+        },
+    ];
+    for (const item of base) {
+        if (
+            aptitude.requirements.length < 30 &&
+            !aptitude.requirements.some((existing) => existing.key === item.key)
+        ) {
+            aptitude.requirements.push({ ...item });
+        }
+    }
 }
 const removing = useForm({});
 const fileInput = ref(null);
@@ -653,13 +708,16 @@ function removeDocument() {
                 })
             "
         >
-            <h2>Sustentos de aptitud</h2>
+            <h2>Sustentos de aptitud y filtro de Etapa 1 (Fólder A)</h2>
             <p class="muted">
-                Registra los documentos y declaraciones juradas que exige el
-                Fólder A de esta plaza. Los méritos se declaran aparte según la
-                rúbrica.
+                Configura el filtro automático de requisitos mínimos del perfil
+                (grado académico, años desde el bachiller, colegiatura) y los
+                documentos del Fólder A de esta plaza. Los méritos se declaran
+                aparte según la rúbrica.
             </p>
             <Errors :errors="aptitude.errors" />
+            <ScreeningEditor v-model="aptitude.screening_rules" />
+            <h3 class="form-section">Documentos del Fólder A y anexos</h3>
             <div
                 v-for="(item, index) in aptitude.requirements"
                 :key="item.key"
@@ -695,6 +753,14 @@ function removeDocument() {
                     @click="addRequirement()"
                 >
                     Añadir sustento
+                </button>
+                <button
+                    v-if="aptitude.requirements.length < 30"
+                    type="button"
+                    class="btn btn-outline"
+                    @click="loadFolderABase"
+                >
+                    Cargar Fólder A base
                 </button>
                 <button
                     v-if="

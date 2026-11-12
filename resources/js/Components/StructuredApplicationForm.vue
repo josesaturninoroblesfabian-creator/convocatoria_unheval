@@ -96,7 +96,7 @@ function save(advance = false) {
         },
     });
 }
-function example(years) {
+function example(years, topDegree = "maestro") {
     const end = props.report.cutoff;
     const start = new Date(end + "T12:00:00Z");
     start.setUTCFullYear(start.getUTCFullYear() - years);
@@ -117,8 +117,11 @@ function example(years) {
                 awarded_at: "2016-01-01",
             },
             {
-                kind: "maestro",
-                name: "Maestría de ejemplo",
+                kind: topDegree,
+                name:
+                    topDegree === "doctor"
+                        ? "Doctorado de ejemplo"
+                        : "Maestría de ejemplo",
                 awarded_at: "2020-01-01",
             },
         ].map((credential) => ({
@@ -127,7 +130,7 @@ function example(years) {
             institution: "Universidad de ejemplo",
         }));
     } else {
-        form.degree = "maestro";
+        form.degree = topDegree;
         form.professional_title = professionalTitle;
         form.bachelor_date = "2015-01-01";
     }
@@ -150,6 +153,10 @@ function example(years) {
             hours: 80,
         },
     ];
+    for (const f of props.application.vacancy.screening_rules?.fields ?? []) {
+        form.answers[f.key] =
+            f.expected_value || f.options?.[0] || "Cumple requisito";
+    }
 }
 </script>
 <template>
@@ -175,7 +182,13 @@ function example(years) {
                 class="btn btn-outline btn-sm"
                 @click="example(6)"
             >
-                Ejemplo de 6 años
+                Ejemplo de 6 años</button
+            ><button
+                type="button"
+                class="btn btn-outline btn-sm"
+                @click="example(6, 'doctor')"
+            >
+                Ejemplo con Doctorado (8 pts)
             </button>
         </div>
         <Errors :errors="form.errors" />

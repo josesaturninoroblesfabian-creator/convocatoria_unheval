@@ -76,18 +76,56 @@ class ManagementController extends Controller
     {
         $recruitmentCall->load('vacancies.jurors:id,name');
         $configuredVacancies = $recruitmentCall->vacancies->filter(VacancyEvaluationWorkflow::configured(...));
-        $reviewed = $recruitmentCall->status === 'EN_EVALUACION' && $configuredVacancies->isNotEmpty()
+        $reviewed = in_array($recruitmentCall->status, ['EN_EVALUACION', 'FINALIZADA'], true) && $configuredVacancies->isNotEmpty()
             ? $recruitmentCall->applications()->whereIn('vacancy_id', $configuredVacancies->modelKeys())
                 ->whereNotNull('submitted_at')->whereIn('status', ['EVALUADA', 'NO_APTO'])
                 ->get(['id', 'vacancy_id', 'reference', 'status', 'evaluation_outcome'])
-                ->sortByDesc(fn (Application $application) => $application->evaluation_outcome['final'] ?? -1)
+                ->sort(function (Application $a, Application $b): int {
+                    $scoreCompare = ($b->evaluation_outcome['final'] ?? -1) <=> ($a->evaluation_outcome['final'] ?? -1);
+                    if ($scoreCompare !== 0) {
+                        return $scoreCompare;
+                    }
+
+                    return ((int) ($b->evaluation_outcome['has_doctor'] ?? false)) <=> ((int) ($a->evaluation_outcome['has_doctor'] ?? false));
+                })
                 ->groupBy('vacancy_id')
-                ->map(fn ($group) => $group->map(fn (Application $application): array => [
-                    'id' => $application->id,
-                    'reference' => $application->reference,
-                    'result' => $application->evaluation_outcome['stage'] ?? $application->status,
-                    'score' => $application->evaluation_outcome['final'] ?? null,
-                ]))
+                ->map(function ($group) {
+                    $qualifying = $group->filter(fn (Application $app): bool => ($app->evaluation_outcome['final'] ?? null) !== null && ($app->evaluation_outcome['stage'] ?? null) === 'SUPERA_MINIMOS');
+                    $topScore = $qualifying->max(fn (Application $app) => $app->evaluation_outcome['final']);
+                    $topTied = $topScore !== null ? $qualifying->filter(fn (Application $app): bool => ($app->evaluation_outcome['final'] ?? null) === $topScore) : collect();
+                    $doctorWinners = $topTied->filter(fn (Application $app): bool => (bool) ($app->evaluation_outcome['has_doctor'] ?? false));
+
+                    return $group->values()->map(function (Application $application) use ($topScore, $topTied, $doctorWinners): array {
+                        $score = $application->evaluation_outcome['final'] ?? null;
+                        $hasDoctor = (bool) ($application->evaluation_outcome['has_doctor'] ?? false);
+                        $isTop = $topScore !== null && $score === $topScore;
+                        $winner = false;
+                        $tieBreaker = null;
+                        if ($isTop) {
+                            if ($topTied->count() === 1) {
+                                $winner = true;
+                            } elseif ($doctorWinners->count() === 1) {
+                                $winner = $hasDoctor;
+                                $tieBreaker = 'doctor';
+                            } else {
+                                $tieBreaker = 'pending';
+                            }
+                        }
+
+                        return [
+                            'id' => $application->id,
+                            'reference' => $application->reference,
+                            'result' => $application->evaluation_outcome['stage'] ?? $application->status,
+                            'external' => $application->evaluation_outcome['external'] ?? null,
+                            'internal' => $application->evaluation_outcome['internal'] ?? null,
+                            'bonus' => $application->evaluation_outcome['bonus'] ?? 0,
+                            'has_doctor' => $hasDoctor,
+                            'winner' => $winner,
+                            'tie_breaker' => $tieBreaker,
+                            'score' => $score,
+                        ];
+                    });
+                })
             : [];
 
         return Inertia::render('ManageCall', [
@@ -199,7 +237,8 @@ class ManagementController extends Controller
                     throw ValidationException::withMessages(['status' => 'Añade al menos una plaza y asigna jurados a todas las plazas.']);
                 }
                 if ($hasRubrics && $vacancies->contains(fn (Vacancy $vacancy): bool => $vacancy->jurors_count !== 3
-                    || ! collect($vacancy->requirements)->contains(fn (array $requirement): bool => $requirement['required'] && ! in_array($requirement['key'], ['silabo_interno', 'bonificacion_discapacidad'], true))
+                    || (! collect($vacancy->requirements)->contains(fn (array $requirement): bool => $requirement['required'] && ! in_array($requirement['key'], ['silabo_interno', 'bonificacion_discapacidad'], true))
+                        && ! ($vacancy->screening_rules['enabled'] ?? false))
                     || ! VacancyEvaluationWorkflow::validCalendar($vacancy, $call->closes_at))) {
                     throw ValidationException::withMessages(['status' => 'Cada plaza necesita tres jurados, al menos un requisito obligatorio de aptitud y ventanas sucesivas de aptitud, externos e internos después del cierre.']);
                 }

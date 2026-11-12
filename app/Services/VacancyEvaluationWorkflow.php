@@ -6,6 +6,7 @@ use App\Models\Application;
 use App\Models\Vacancy;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class VacancyEvaluationWorkflow
@@ -122,11 +123,49 @@ class VacancyEvaluationWorkflow
         $criteria = [];
         foreach ($vacancy->external_evaluation['rubrics'] ?? [] as $rubric) {
             foreach ($rubric['items'] as $item) {
-                $criteria[$rubric['key'].':'.$item['key']] = [...$item, 'rubric' => $rubric['key'], 'rubric_name' => $rubric['name']];
+                $criteria[$rubric['key'].':'.$item['key']] = [
+                    ...$item,
+                    'rubric' => $rubric['key'],
+                    'rubric_name' => $rubric['name'],
+                    'rubric_max' => $rubric['max'],
+                ];
             }
         }
 
         return $criteria;
+    }
+
+    public static function defaultMeritsFromFormData(Vacancy $vacancy, array $formData): array
+    {
+        if (! self::configured($vacancy)) {
+            return [];
+        }
+
+        $criteria = self::criteria($vacancy);
+        $mapping = [
+            'doctor' => 'formacion:doctor',
+            'maestro' => 'formacion:maestro',
+            'bachiller' => 'formacion:bachiller',
+            'titulo' => 'formacion:titulo',
+            'segunda_especialidad' => 'formacion_servicio:especialidad',
+        ];
+
+        $merits = [];
+        foreach ($formData['credentials'] ?? [] as $credential) {
+            $criterionKey = $mapping[$credential['kind'] ?? ''] ?? null;
+            if (! $criterionKey || ! isset($criteria[$criterionKey]) || empty($credential['id'])) {
+                continue;
+            }
+            $merits[] = [
+                'id' => (string) Str::uuid(),
+                'criterion' => $criterionKey,
+                'quantity' => 1,
+                'description' => trim(($credential['name'] ?? '').' · '.($credential['institution'] ?? ''), ' ·'),
+                'reuse' => 'acad_'.$credential['id'],
+            ];
+        }
+
+        return $merits;
     }
 
     public static function scores(Application $application, ?array $validated = null): array
