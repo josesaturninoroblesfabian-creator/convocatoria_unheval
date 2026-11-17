@@ -10,6 +10,7 @@ use App\Models\AuditEvent;
 use App\Models\RecruitmentCall;
 use App\Models\User;
 use App\Models\Vacancy;
+use App\Services\ApplicantScreening;
 use App\Services\NombramientoRubric;
 use App\Services\ProfileRegistryLookup;
 use App\Services\VacancyEvaluationWorkflow;
@@ -237,7 +238,7 @@ class ManagementController extends Controller
                     throw ValidationException::withMessages(['status' => 'Añade al menos una plaza y asigna jurados a todas las plazas.']);
                 }
                 if ($hasRubrics && $vacancies->contains(fn (Vacancy $vacancy): bool => $vacancy->jurors_count !== 3
-                    || (! collect($vacancy->requirements)->contains(fn (array $requirement): bool => $requirement['required'] && ! in_array($requirement['key'], ['silabo_interno', 'bonificacion_discapacidad'], true))
+                    || (! collect($vacancy->requirements)->contains(fn (array $requirement): bool => $requirement['required'] && ! ApplicantScreening::isSyllabus($requirement['key']) && $requirement['key'] !== 'bonificacion_discapacidad')
                         && ! ($vacancy->screening_rules['enabled'] ?? false))
                     || ! VacancyEvaluationWorkflow::validCalendar($vacancy, $call->closes_at))) {
                     throw ValidationException::withMessages(['status' => 'Cada plaza necesita tres jurados, al menos un requisito obligatorio de aptitud y ventanas sucesivas de aptitud, externos e internos después del cierre.']);

@@ -34,6 +34,7 @@ const eligibility = useForm({
     documents: Object.fromEntries(
         props.application.documents.map((d) => [d.id, ""]),
     ),
+    document_notes: {},
 });
 const evaluation = useForm({
     scores: Object.fromEntries(
@@ -107,12 +108,12 @@ const hasStructuredFormData = computed(() => {
     if (!fd) return false;
     return Boolean(
         fd.credentials?.length ||
-            fd.professional_title ||
-            fd.degree ||
-            fd.bachelor_date ||
-            fd.experience?.length ||
-            fd.training?.length ||
-            (fd.answers && Object.keys(fd.answers).length),
+        fd.professional_title ||
+        fd.degree ||
+        fd.bachelor_date ||
+        fd.experience?.length ||
+        fd.training?.length ||
+        (fd.answers && Object.keys(fd.answers).length),
     );
 });
 function markAllDocumentsCompliant() {
@@ -403,7 +404,20 @@ function grade() {
                                 </option>
                                 <option value="CUMPLE">Cumple</option>
                                 <option value="NO_CUMPLE">No cumple</option>
-                            </select></template
+                            </select>
+                            <label
+                                v-if="
+                                    eligibility.documents[d.id] === 'NO_CUMPLE'
+                                "
+                            >
+                                Observación del documento (opcional)
+                                <textarea
+                                    v-model="eligibility.document_notes[d.id]"
+                                    maxlength="3000"
+                                    rows="2"
+                                    :disabled="!canWrite"
+                                ></textarea>
+                            </label> </template
                         ><span
                             v-if="
                                 !application.documents.some(
@@ -464,6 +478,7 @@ function grade() {
                     :merits="application.form_data?.merits ?? []"
                     :merit-criteria="meritCriteria"
                     :documents="application.documents"
+                    :document-requirements="documentRequirements"
                     @view-document="selected = $event"
                     :can-write="canWrite && application.status === 'APTO'"
                 />

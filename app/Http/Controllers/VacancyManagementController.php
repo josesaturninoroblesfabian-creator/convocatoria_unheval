@@ -8,6 +8,7 @@ use App\Models\Application;
 use App\Models\AuditEvent;
 use App\Models\RecruitmentCall;
 use App\Models\Vacancy;
+use App\Services\ApplicantScreening;
 use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -91,7 +92,12 @@ class VacancyManagementController extends Controller
         $vacancy->load('recruitmentCall');
         abort_unless($vacancy->recruitmentCall->status === 'BORRADOR', 409);
 
-        return Inertia::render('Vacancy', ['vacancy' => $vacancy, 'preview' => true]);
+        return Inertia::render('Vacancy', [
+            'vacancy' => $vacancy,
+            'preview' => true,
+            'rubricSummary' => VacancyEvaluationWorkflow::rubricSummary($vacancy),
+            'applicationRequirements' => ApplicantScreening::groupVacancyRequirements($vacancy),
+        ]);
     }
 
     public function aptitude(Request $request, Vacancy $vacancy): RedirectResponse
@@ -99,7 +105,7 @@ class VacancyManagementController extends Controller
         $data = $request->validate([
             ...ConfigureScreeningRequest::configurationRules(),
             ...StoreVacancyRequest::requirementRules(),
-            'requirements' => ['present', 'array', 'list', 'max:30'],
+            'requirements' => ['present', 'array', 'list', 'max:'.StoreVacancyRequest::MAX_REQUIREMENTS],
             'requirements.*.key' => ['required', 'alpha_dash:ascii', 'distinct', 'max:40', 'not_regex:/^merito_/'],
         ]);
         foreach ($data['requirements'] as $index => $requirement) {
@@ -273,6 +279,7 @@ class VacancyManagementController extends Controller
             'vacancy' => $vacancy,
             'hasEvaluation' => $vacancy?->external_evaluation !== null || $vacancy?->internal_evaluation !== null,
             'contractHours' => Vacancy::CONTRACT_HOURS,
+            'maxRequirements' => StoreVacancyRequest::MAX_REQUIREMENTS,
             'faculties' => Vacancy::query()->distinct()->orderBy('faculty')->pluck('faculty'),
         ]);
     }

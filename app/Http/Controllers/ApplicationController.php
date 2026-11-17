@@ -11,9 +11,10 @@ use App\Models\Vacancy;
 use App\Services\ApplicantScreening;
 use App\Services\ApplicationWorkflow;
 use App\Services\VacancyEvaluationWorkflow;
-use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -63,17 +64,24 @@ class ApplicationController extends Controller
         $application->load('vacancy', 'recruitmentCall', 'documents');
 
         $report = $screening->assess($application);
+        $publications = $application->vacancy->stage_publications ?? [];
+        $externalResult = collect($publications['external']['rows'] ?? [])->firstWhere('reference', $application->reference);
 
         return Inertia::render('Application', [
             'application' => VacancyEvaluationWorkflow::applicantView($application),
             'screening' => $report,
             'documentRequirements' => $screening->documents($application),
-            'meritCriteria' => $application->status === 'BORRADOR' && VacancyEvaluationWorkflow::configured($application->vacancy)
+            'curriculumIndex' => VacancyEvaluationWorkflow::curriculumIndex($application),
+            'meritCriteria' => ! $application->submitted_at && VacancyEvaluationWorkflow::configured($application->vacancy)
                 ? VacancyEvaluationWorkflow::criteria($application->vacancy) : [],
             'evaluationStatus' => VacancyEvaluationWorkflow::configured($application->vacancy) ? [
                 'calendar' => VacancyEvaluationWorkflow::windows($application->vacancy),
-                'advanced' => $application->submitted_at && isset($application->vacancy->stage_publications['external']) && VacancyEvaluationWorkflow::externalPassed($application),
-                'externalPublished' => isset($application->vacancy->stage_publications['external']),
+                'aptitudePublished' => isset($publications['aptitude']),
+                'advanced' => ($externalResult['result'] ?? null) === 'SUPERA_EXTERNA',
+                'externalPublished' => isset($publications['external']),
+                'externalScore' => $externalResult['score'] ?? null,
+                'externalNotes' => $externalResult ? $application->external_evaluation['notes'] ?? null : null,
+                'accreditedMerits' => $externalResult ? $application->external_evaluation['merits'] ?? [] : [],
                 'externalMinimum' => $application->vacancy->external_evaluation['minimum'] ?? null,
                 'externalMaximum' => $application->vacancy->external_evaluation['maximum'] ?? 55,
                 'result' => $application->recruitmentCall->results_published_at ? $application->evaluation_outcome : null,
@@ -208,19 +216,16 @@ class ApplicationController extends Controller
             $workflow->assertOpen($call);
             abort_unless($locked->status === 'BORRADOR' && VacancyEvaluationWorkflow::configured($locked->vacancy), 409);
             $criteria = VacancyEvaluationWorkflow::criteria($locked->vacancy);
-            $stageOneKeys = array_filter(
+            $reusableKeys = array_filter(
                 array_column($screening->documents($locked), 'key'),
-                fn (string $key): bool => ! in_array($key, ['bonificacion_discapacidad', 'silabo_interno'], true) && ! str_starts_with($key, 'merito_'),
+                fn (string $key): bool => in_array(ApplicantScreening::documentSection($key), ['administrativos', 'curriculo'], true)
+                    && $key !== 'bonificacion_discapacidad',
             );
-            $requirements = array_values(array_unique([
-                ...array_diff(array_column($locked->vacancy->requirements, 'key'), ['bonificacion_discapacidad', 'silabo_interno']),
-                ...$stageOneKeys,
-            ]));
             foreach ($data['merits'] as $index => $entry) {
                 if (! isset($criteria[$entry['criterion']])) {
                     throw ValidationException::withMessages(["merits.$index.criterion" => 'Elige un criterio de esta plaza.']);
                 }
-                if (! empty($entry['reuse']) && ! in_array($entry['reuse'], $requirements, true)) {
+                if (! empty($entry['reuse']) && ! in_array($entry['reuse'], $reusableKeys, true)) {
                     throw ValidationException::withMessages(["merits.$index.reuse" => 'Elige un sustento de aptitud de esta plaza.']);
                 }
             }
@@ -245,8 +250,12 @@ class ApplicationController extends Controller
     public function submit(Request $request, Application $application, ApplicationWorkflow $workflow): RedirectResponse
     {
         abort_unless($application->user_id === $request->user()->id, 404);
-        $request->validate(['confirm' => ['accepted']]);
-        $workflow->submit($application, $request->user());
+        $data = $request->validate([
+            'confirm' => ['accepted'],
+            'consent' => ['sometimes', 'accepted'],
+            'statement' => ['nullable', 'string', 'max:4000'],
+        ]);
+        $workflow->submit($application, $request->user(), declaration: isset($data['consent']) ? Arr::only($data, ['statement']) : null);
 
         return back()->with('success', 'Postulación recibida. Tu cargo de recepción ya está disponible.');
     }
@@ -257,17 +266,56 @@ class ApplicationController extends Controller
         abort_unless($application->user_id === $request->user()->id || ($application->submitted_at && ($workflow->canReview($request->user(), $application) || $request->user()->isManager())), 404);
         if ($request->user()->role === 'jurado' && VacancyEvaluationWorkflow::configured($application->vacancy)) {
             abort_if(in_array($application->status, ['RECIBIDA', 'NO_APTO'], true) && str_starts_with($document->requirement_key, 'merito_'), 404);
-            abort_if($document->requirement_key === 'silabo_interno' && ! VacancyEvaluationWorkflow::externalPassed($application), 404);
+            abort_if(ApplicantScreening::isSyllabus($document->requirement_key) && ! VacancyEvaluationWorkflow::internalEvidenceAvailable($application), 404);
         }
         abort_unless(Storage::disk('local')->exists($document->path), 404);
 
         return response()->file(Storage::disk('local')->path($document->path), ['Content-Type' => 'application/pdf', 'Content-Disposition' => 'inline; filename="documento.pdf"', 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store']);
     }
 
-    public function receipt(Request $request, Application $application): View
+    public function receipt(Request $request, Application $application, ApplicantScreening $screening): HttpResponse
     {
         abort_unless($application->user_id === $request->user()->id && $application->submitted_at, 404);
 
-        return view('receipt', ['application' => $application->load('vacancy', 'recruitmentCall', 'documents')]);
+        $application->load('vacancy', 'recruitmentCall', 'documents');
+        $requirements = array_column($screening->documents($application), null, 'key');
+        $positions = array_flip(collect($requirements)->sortBy(fn (array $requirement): int => match ($requirement['section']) {
+            'administrativos' => 0,
+            'curriculo' => 1,
+            'meritos' => 2,
+            'internos' => 3,
+        })->keys()->all());
+
+        return response()->view('receipt', [
+            'application' => $application,
+            'requirements' => $requirements,
+            'documents' => $application->documents->sortBy(fn (ApplicationDocument $document): int => $positions[$document->requirement_key] ?? PHP_INT_MAX),
+        ], headers: ['Cache-Control' => 'private, no-store']);
+    }
+
+    public function curriculum(Request $request, Application $application, ApplicantScreening $screening): HttpResponse
+    {
+        abort_unless($application->user_id === $request->user()->id, 404);
+        $application->load('vacancy', 'recruitmentCall', 'documents');
+
+        return response()->view('application-curriculum', [
+            'application' => $application,
+            'applicant' => $application->applicant_snapshot ?? $request->user()->only('name', 'document_number'),
+            'requirements' => array_column($screening->documents($application), null, 'key'),
+            'entries' => VacancyEvaluationWorkflow::curriculumIndex($application),
+            'documents' => $application->documents->keyBy('requirement_key'),
+        ], headers: ['Cache-Control' => 'private, no-store']);
+    }
+
+    public function registrationRequest(Request $request, Application $application): HttpResponse
+    {
+        abort_unless($application->user_id === $request->user()->id, 404);
+        $application->load('vacancy', 'recruitmentCall');
+        abort_unless(in_array('solicitud_inscripcion', array_column($application->vacancy->requirements, 'key'), true), 404);
+
+        return response()->view('application-registration-request', [
+            'application' => $application,
+            'applicant' => $application->applicant_snapshot ?? $request->user()->only('name', 'document_number', 'email', 'phone'),
+        ], headers: ['Cache-Control' => 'private, no-store']);
     }
 }

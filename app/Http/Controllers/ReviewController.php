@@ -31,12 +31,12 @@ class ReviewController extends Controller
         if ($byVacancy && in_array($application->status, ['RECIBIDA', 'NO_APTO'], true)) {
             $requirements = array_values(array_filter(
                 $requirements,
-                fn (array $requirement): bool => $requirement['key'] !== 'silabo_interno' && ! str_starts_with($requirement['key'], 'merito_'),
+                fn (array $requirement): bool => ! ApplicantScreening::isSyllabus($requirement['key']) && ! str_starts_with($requirement['key'], 'merito_'),
             ));
             $application->setRelation('documents', $application->documents->whereIn('requirement_key', array_column($requirements, 'key'))->values());
         }
-        if ($byVacancy && ! VacancyEvaluationWorkflow::externalPassed($application)) {
-            $application->setRelation('documents', $application->documents->where('requirement_key', '!=', 'silabo_interno')->values());
+        if ($byVacancy && ! VacancyEvaluationWorkflow::internalEvidenceAvailable($application)) {
+            $application->setRelation('documents', $application->documents->reject(fn ($document): bool => ApplicantScreening::isSyllabus($document->requirement_key))->values());
         }
         $phase = $application->status === 'RECIBIDA' ? 'aptitude' : (($progress['stage'] ?? null) === 'INTERNA' ? 'internal' : 'external');
 
@@ -59,7 +59,14 @@ class ReviewController extends Controller
     public function eligibility(Request $request, Application $application, ApplicationWorkflow $workflow, ApplicantScreening $screening): RedirectResponse
     {
         abort_unless($workflow->canReview($request->user(), $application), 404);
-        $data = $request->validate(['notes' => ['required', 'string', 'min:5', 'max:3000'], 'documents' => ['present', 'array'], 'documents.*' => ['required', Rule::in(['CUMPLE', 'NO_CUMPLE'])], 'academic_profile_confirmed' => ['sometimes', 'boolean']]);
+        $data = $request->validate([
+            'notes' => ['required', 'string', 'min:5', 'max:3000'],
+            'documents' => ['present', 'array'],
+            'documents.*' => ['required', Rule::in(['CUMPLE', 'NO_CUMPLE'])],
+            'document_notes' => ['sometimes', 'array'],
+            'document_notes.*' => ['nullable', 'string', 'max:3000'],
+            'academic_profile_confirmed' => ['sometimes', 'boolean'],
+        ]);
         DB::transaction(function () use ($application, $data, $screening) {
             $call = RecruitmentCall::lockForUpdate()->findOrFail($application->recruitment_call_id);
             $locked = Application::lockForUpdate()->findOrFail($application->id);
@@ -73,7 +80,7 @@ class ReviewController extends Controller
             }
             $eligible = true;
             foreach ($screening->documents($locked) as $requirement) {
-                if ($byVacancy && ($requirement['key'] === 'silabo_interno' || str_starts_with($requirement['key'], 'merito_'))) {
+                if ($byVacancy && (ApplicantScreening::isSyllabus($requirement['key']) || str_starts_with($requirement['key'], 'merito_'))) {
                     continue;
                 }
                 $requiredForAptitude = $requirement['required_for_aptitude'] ?? $requirement['required'];
@@ -92,7 +99,8 @@ class ReviewController extends Controller
                 if ($requiredForAptitude && $verdict === 'NO_CUMPLE') {
                     $eligible = false;
                 }
-                $document->update(['review_status' => $verdict, 'review_notes' => $data['notes']]);
+                $notes = $verdict === 'NO_CUMPLE' ? ($data['document_notes'][$document->id] ?? $data['notes']) : $data['notes'];
+                $document->update(['review_status' => $verdict, 'review_notes' => $notes]);
             }
             $verifiedReport = $screening->verifiedAcademicReport($locked);
             $eligible = $eligible && ($verifiedReport['eligible'] ?? true) && (! $usesCredentials || $data['academic_profile_confirmed']);

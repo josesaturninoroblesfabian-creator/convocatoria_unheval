@@ -45,6 +45,9 @@ class VacancyApplicationWorkflowTest extends TestCase
             'requirements' => [
                 ['key' => 'titulo', 'label' => 'Título profesional', 'required' => true],
                 ['key' => 'bonificacion_discapacidad', 'label' => 'Sustento de bonificación', 'required' => false],
+                ['key' => 'solicitud_inscripcion', 'label' => 'Solicitud de inscripción', 'required' => true],
+                ['key' => 'dj_nepotismo', 'label' => 'Declaración jurada de parentesco', 'required' => true],
+                ['key' => 'silabo_interno_curso_1', 'label' => 'Sílabo de la plaza', 'required' => true],
             ],
             'external_evaluation' => ExternalEvaluationRubric::template('CONTRATO', 'DC A2'),
             'internal_evaluation' => InternalEvaluationRubric::template('CONTRATO', 'DC A2'),
@@ -55,7 +58,12 @@ class VacancyApplicationWorkflowTest extends TestCase
 
         $this->actingAs($applicant)->post(route('applications.store', $vacancy))->assertRedirect();
         $application = Application::sole();
-        $this->put(route('applications.update', $application), ['statement' => 'Declaración de prueba', 'consent' => true])->assertSessionHas('success');
+        $this->get(route('vacancies.show', $vacancy))->assertInertia(fn (Assert $page) => $page
+            ->where('ownApplication.id', $application->id)
+            ->where('rubricSummary.external.minimum', 18)
+            ->where('applicationRequirements.internos.0.key', 'silabo_interno_curso_1'));
+        $this->get(route('applications.registration-request', $application))->assertOk()
+            ->assertSee($applicant->name)->assertSee($vacancy->airhsp);
         $merits = [
             ['id' => (string) Str::uuid(), 'criterion' => 'formacion:titulo', 'description' => 'Título', 'quantity' => 1, 'reuse' => 'titulo'],
             ['id' => (string) Str::uuid(), 'criterion' => 'formacion:doctor', 'description' => 'Doctorado', 'quantity' => 1],
@@ -64,25 +72,45 @@ class VacancyApplicationWorkflowTest extends TestCase
         ];
         $this->put(route('applications.merits', $application), ['merits' => $merits])->assertSessionHas('success');
         $submit = route('applications.submit', $application);
-        $this->post($submit, ['confirm' => true])->assertSessionHasErrors('application');
+        $submission = ['confirm' => true, 'consent' => true, 'statement' => 'Declaración de prueba'];
+        $this->post($submit, $submission)->assertSessionHasErrors('application');
+        $this->assertNull($application->fresh()->consented_at);
 
-        foreach (['titulo', 'bonificacion_discapacidad', ...array_map(fn (array $entry): string => 'merito_'.$entry['id'], array_slice($merits, 1))] as $key) {
+        foreach (['titulo', 'solicitud_inscripcion', 'dj_nepotismo', 'silabo_interno_curso_1', 'bonificacion_discapacidad', ...array_map(fn (array $entry): string => 'merito_'.$entry['id'], array_slice($merits, 1))] as $key) {
             $this->post(route('applications.upload', $application), [
                 'requirement_key' => $key,
-                'file' => new UploadedFile(database_path('fixtures/sustento-demo.pdf'), 'sustento.pdf', 'application/pdf', null, true),
+                'file' => new UploadedFile(database_path('fixtures/sustento-demo.pdf'), $key.'.pdf', 'application/pdf', null, true),
             ])->assertSessionHas('success');
         }
-        $this->post($submit, ['confirm' => true])->assertSessionHas('success');
+        $this->post($submit, $submission)->assertSessionHas('success');
         $this->assertSame('18.000', $application->fresh()->declared_score);
+        $this->assertSame($submission['statement'], $application->fresh()->statement);
+        $this->get(route('applications.curriculum', $application))->assertOk()
+            ->assertSeeInOrder(['Formación profesional', 'titulo.pdf', 'Publicaciones']);
+        $this->get(route('applications.receipt', $application))->assertOk()
+            ->assertSeeInOrder(['Fólder A', 'dj_nepotismo.pdf', 'Fólder B', 'silabo_interno_curso_1.pdf']);
+        $this->actingAs(User::factory()->create())->get(route('applications.curriculum', $application))->assertNotFound();
+        $this->get(route('applications.registration-request', $application))->assertNotFound();
+        $this->actingAs($applicant);
         $this->put(route('applications.merits', $application), ['merits' => []])->assertConflict();
 
         $this->travel(90)->minutes();
         $this->actingAs($manager)->post($transition, ['status' => 'EN_EVALUACION'])->assertSessionHas('success');
+        $notice = [
+            'purpose' => 'citacion', 'label' => 'Clase modelo', 'starts_at' => $schedule[2]['starts_at'],
+        ];
+        $calendarRoute = route('management.vacancies.reschedule', $vacancy);
+        $this->put($calendarRoute, ['schedule' => [...$schedule, $notice], 'reason' => 'Programación de clase modelo'])
+            ->assertSessionHasErrors('schedule.3.detail');
+        $this->put($calendarRoute, ['schedule' => [...$schedule, [...$notice, 'detail' => 'Consultar el aula con la comisión.']], 'reason' => 'Programación de clase modelo'])
+            ->assertSessionHas('success');
         $this->actingAs($jurors[0])->get(route('review.show', $application))
-            ->assertInertia(fn (Assert $page) => $page->has('application.documents', 2));
+            ->assertInertia(fn (Assert $page) => $page->has('application.documents', 4));
+        $syllabus = $application->documents()->where('requirement_key', 'silabo_interno_curso_1')->sole();
+        $this->get(route('documents.show', $syllabus))->assertNotFound();
         $aptitude = [
             'notes' => 'Sustentos de aptitud conformes.',
-            'documents' => $application->documents()->whereIn('requirement_key', ['titulo', 'bonificacion_discapacidad'])->pluck('id')->mapWithKeys(fn ($id) => [$id => 'CUMPLE'])->all(),
+            'documents' => $application->documents()->whereIn('requirement_key', ['titulo', 'solicitud_inscripcion', 'dj_nepotismo', 'bonificacion_discapacidad'])->pluck('id')->mapWithKeys(fn ($id) => [$id => 'CUMPLE'])->all(),
         ];
         $this->post(route('review.eligibility', $application), $aptitude)->assertConflict();
         $this->travel(45)->minutes();
@@ -111,6 +139,10 @@ class VacancyApplicationWorkflowTest extends TestCase
             ])->assertSessionHas('success');
         }
         $this->assertSame(18, $application->fresh()->external_evaluation['total']);
+        $this->actingAs($applicant)->get(route('applications.show', $application))->assertInertia(fn (Assert $page) => $page
+            ->where('evaluationStatus.externalScore', null)->where('evaluationStatus.externalNotes', null));
+        $this->actingAs($jurors[0]);
+        $this->get(route('documents.show', $syllabus))->assertNotFound();
 
         $internal = [
             'stage' => 'interna', 'notes' => 'Evaluación individual realizada.',
@@ -122,6 +154,10 @@ class VacancyApplicationWorkflowTest extends TestCase
         $this->get(route('vacancies.show', $vacancy))->assertInertia(fn (Assert $page) => $page
             ->where('stagePublications.external.rows.0.result', 'SUPERA_EXTERNA')
             ->where('stagePublications.external.rows.0.score', 18));
+        $this->actingAs($applicant)->get(route('applications.show', $application))->assertInertia(fn (Assert $page) => $page
+            ->where('evaluationStatus.advanced', true)->where('evaluationStatus.externalScore', 18)
+            ->where('evaluationStatus.externalNotes', $proposal['notes']));
+        $this->actingAs($jurors[0])->get(route('documents.show', $syllabus))->assertOk();
         foreach ($jurors as $juror) {
             $this->actingAs($juror)->post($evaluation, $internal)->assertSessionHas('success');
         }

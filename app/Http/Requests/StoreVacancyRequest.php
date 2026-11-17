@@ -9,6 +9,8 @@ use Illuminate\Validation\Rule;
 
 class StoreVacancyRequest extends FormRequest
 {
+    public const MAX_REQUIREMENTS = 60;
+
     public function authorize(): bool
     {
         return $this->user()?->isManager() ?? false;
@@ -66,12 +68,13 @@ class StoreVacancyRequest extends FormRequest
     {
         return [
             'schedule' => ['sometimes', 'array', 'list', 'max:20'],
-            'schedule.*' => ['array:label,starts_at,ends_at,detail,stage'],
+            'schedule.*' => ['array:label,starts_at,ends_at,detail,stage,purpose'],
             'schedule.*.stage' => ['nullable', 'distinct', Rule::in(VacancyEvaluationWorkflow::PHASES)],
+            'schedule.*.purpose' => ['nullable', Rule::in(['citacion', 'reclamo']), 'prohibits:schedule.*.stage'],
             'schedule.*.label' => ['required', 'string', 'max:150'],
             'schedule.*.starts_at' => ['required', 'date_format:Y-m-d\TH:i'],
             'schedule.*.ends_at' => ['nullable', 'date_format:Y-m-d\TH:i', 'after_or_equal:schedule.*.starts_at'],
-            'schedule.*.detail' => ['nullable', 'string', 'max:300'],
+            'schedule.*.detail' => ['required_if:schedule.*.purpose,citacion,reclamo', 'nullable', 'string', 'max:300'],
         ];
     }
 
@@ -94,7 +97,7 @@ class StoreVacancyRequest extends FormRequest
     public static function requirementRules(): array
     {
         return [
-            'requirements' => ['sometimes', 'array', 'list', 'max:30'],
+            'requirements' => ['sometimes', 'array', 'list', 'max:'.self::MAX_REQUIREMENTS],
             'requirements.*' => ['array:key,label,required'],
             'requirements.*.key' => ['required', 'alpha_dash', 'distinct', 'max:40'],
             'requirements.*.label' => ['required', 'string', 'max:1000'],

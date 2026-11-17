@@ -26,9 +26,10 @@ class ApplicationWorkflow
         return $user->role === 'jurado' && $application->vacancy->jurors()->where('users.id', $user->id)->exists();
     }
 
-    public function submit(Application $application, User $user, bool $notifyApplicant = true): void
+    /** @param array{statement?: string|null}|null $declaration */
+    public function submit(Application $application, User $user, bool $notifyApplicant = true, ?array $declaration = null): void
     {
-        DB::transaction(function () use ($application, $user, $notifyApplicant) {
+        DB::transaction(function () use ($application, $user, $notifyApplicant, $declaration) {
             $call = RecruitmentCall::lockForUpdate()->findOrFail($application->recruitment_call_id);
             $locked = Application::lockForUpdate()->findOrFail($application->id);
             abort_unless($locked->user_id === $user->id, 404);
@@ -51,8 +52,11 @@ class ApplicationWorkflow
                     }
                 }
             }
-            if (! $locked->consented_at || ! $user->document_number || ! $user->phone) {
+            if ((! $locked->consented_at && $declaration === null) || ! $user->document_number || ! $user->phone) {
                 throw ValidationException::withMessages(['application' => 'Completa tus datos y acepta la declaración antes del envío.']);
+            }
+            if ($declaration !== null) {
+                $locked->fill(['consented_at' => now(), 'statement' => $declaration['statement'] ?? null]);
             }
             $snapshot = $user->only('name', 'email', 'document_number', 'phone');
             $hash = hash('sha256', json_encode(['reference' => $locked->reference, 'vacancy_id' => $locked->vacancy_id, 'profile' => $snapshot, 'form' => $locked->form_data, 'screening' => $screeningReport, 'statement' => $locked->statement, 'documents' => $locked->documents->sortBy('requirement_key')->map->only(['requirement_key', 'sha256'])->values()->all()], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));

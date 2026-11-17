@@ -57,6 +57,18 @@ function editCalendar(vacancy) {
     calendar.reason = "";
     calendar.schedule = (vacancy.schedule ?? []).map((event) => ({ ...event }));
 }
+function addNotice(purpose) {
+    calendar.schedule.push({
+        purpose,
+        label:
+            purpose === "citacion"
+                ? "Citación de aspectos internos"
+                : "Canal de reclamos",
+        starts_at: "",
+        ends_at: "",
+        detail: "",
+    });
+}
 function saveCalendar() {
     calendar.put(
         url(`/gestion/plazas/${scheduleVacancy.value.id}/cronograma`),
@@ -322,7 +334,7 @@ function saveJury() {
                     class="text-link"
                     @click="editCalendar(v)"
                 >
-                    Reprogramar evaluación
+                    Editar cronograma y avisos
                 </button>
                 <div
                     v-if="
@@ -406,17 +418,25 @@ function saveJury() {
             @click.self="scheduleVacancy = null"
         >
             <form class="modal wide-modal" @submit.prevent="saveCalendar">
-                <h2>Reprogramar evaluación</h2>
+                <h2>Cronograma y avisos de evaluación</h2>
                 <p>{{ scheduleVacancy.school }} · Hora de Perú</p>
                 <Errors :errors="calendar.errors" />
                 <div
-                    v-for="event in calendar.schedule.filter(
-                        (item) => item.stage,
-                    )"
-                    :key="event.stage"
+                    v-for="(event, index) in calendar.schedule"
+                    :key="event.stage ?? index"
                     class="entry-card"
                 >
-                    <strong>{{ event.label }}</strong>
+                    <div class="row between wrap">
+                        <strong>{{ event.label }}</strong>
+                        <button
+                            v-if="!event.stage"
+                            type="button"
+                            class="text-link"
+                            @click="calendar.schedule.splice(index, 1)"
+                        >
+                            Quitar aviso
+                        </button>
+                    </div>
                     <div class="form-grid">
                         <label
                             >Inicio<input
@@ -428,14 +448,38 @@ function saveJury() {
                             >Cierre<input
                                 v-model="event.ends_at"
                                 type="datetime-local"
-                                required
+                                :required="Boolean(event.stage)"
                         /></label>
                     </div>
                     <label
-                        >Indicaciones<input
+                        >{{
+                            event.purpose === "reclamo"
+                                ? "Canal de reclamos e instrucciones"
+                                : "Indicaciones públicas"
+                        }}<input
                             v-model="event.detail"
                             maxlength="300"
+                            :required="Boolean(event.purpose)"
                     /></label>
+                </div>
+                <div
+                    v-if="calendar.schedule.length < 20"
+                    class="flex flex-wrap gap-2"
+                >
+                    <button
+                        type="button"
+                        class="btn btn-outline btn-sm"
+                        @click="addNotice('citacion')"
+                    >
+                        Añadir citación
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn-outline btn-sm"
+                        @click="addNotice('reclamo')"
+                    >
+                        Añadir canal de reclamos
+                    </button>
                 </div>
                 <label
                     >Motivo de la reprogramación<textarea

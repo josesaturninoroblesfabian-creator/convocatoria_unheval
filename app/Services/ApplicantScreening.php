@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Application;
+use App\Models\Vacancy;
 use Carbon\CarbonImmutable;
 use Illuminate\Validation\ValidationException;
 
@@ -174,7 +175,7 @@ class ApplicantScreening
         $requirements = $application->vacancy->requirements;
         $byVacancy = VacancyEvaluationWorkflow::configured($application->vacancy);
         if ($byVacancy) {
-            $requirements = array_map(fn (array $requirement): array => $requirement['key'] === 'silabo_interno'
+            $requirements = array_map(fn (array $requirement): array => self::isSyllabus($requirement['key'])
                 ? [...$requirement, 'required_for_aptitude' => false] : $requirement, $requirements);
         }
         if ($application->vacancy->screening_rules['enabled'] ?? false) {
@@ -224,7 +225,31 @@ class ApplicantScreening
             }
         }
 
-        return $requirements;
+        return array_map(fn (array $requirement): array => [
+            ...$requirement,
+            'section' => self::documentSection($requirement['key']),
+        ], $requirements);
+    }
+
+    public static function isSyllabus(string $key): bool
+    {
+        return in_array($key, ['silabo', 'silabo_interno'], true) || str_starts_with($key, 'silabo_interno_');
+    }
+
+    public static function documentSection(string $key): string
+    {
+        return match (true) {
+            self::isSyllabus($key) => 'internos',
+            str_starts_with($key, 'merito_') => 'meritos',
+            in_array($key, ['cv', 'titulo', 'grado', 'bachiller', 'experiencia'], true),
+            preg_match('/^(acad|exp|cap)_/', $key) === 1 => 'curriculo',
+            default => 'administrativos',
+        };
+    }
+
+    public static function groupVacancyRequirements(Vacancy $vacancy): array
+    {
+        return collect($vacancy->requirements)->groupBy(fn (array $requirement): string => self::documentSection($requirement['key']))->toArray();
     }
 
     public function degreeLabel(string $degree): string

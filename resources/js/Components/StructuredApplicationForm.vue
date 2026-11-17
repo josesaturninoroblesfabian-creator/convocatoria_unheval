@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useForm } from "@inertiajs/vue3";
 import AcademicCredentialFields from "./AcademicCredentialFields.vue";
 import Errors from "./Errors.vue";
@@ -17,7 +17,7 @@ const props = defineProps({
     editable: Boolean,
     profileCredentials: { type: Array, default: () => [] },
 });
-const emit = defineEmits(["continue"]);
+const emit = defineEmits(["continue", "dirty"]);
 const initial = props.application.form_data || {};
 const usesCredentials = computed(
     () => !!props.report?.rules?.academic_credentials,
@@ -28,8 +28,6 @@ const usesAppointmentTemplate = computed(
         "nombramiento_referencia",
 );
 const form = useForm({
-    statement: props.application.statement || "",
-    consent: !!props.application.consented_at,
     ...(usesCredentials.value
         ? { credentials: initial.credentials || [] }
         : {
@@ -41,6 +39,10 @@ const form = useForm({
     training: initial.training || [],
     answers: initial.answers || {},
 });
+watch(
+    () => form.isDirty,
+    (dirty) => emit("dirty", dirty),
+);
 function credentialKey(credential) {
     return JSON.stringify(
         [
@@ -82,16 +84,11 @@ function training() {
     });
 }
 function save(advance = false) {
-    if (advance && !form.consent) {
-        form.setError(
-            "consent",
-            "Acepta la declaración de veracidad antes de continuar.",
-        );
-        return;
-    }
     form.put(url(`/mis-postulaciones/${props.application.id}/formulario`), {
         preserveScroll: true,
         onSuccess: (page) => {
+            form.defaults();
+            emit("dirty", false);
             if (advance && page.props.screening?.eligible) emit("continue");
         },
     });
@@ -407,27 +404,6 @@ function example(years, topDegree = "maestro") {
                             :maxlength="f.type === 'text' ? 1000 : undefined"
                     /></label>
                 </div>
-                <div class="form-section">
-                    <label
-                        >Información complementaria<textarea
-                            v-model="form.statement"
-                            rows="3"
-                            maxlength="4000"
-                        ></textarea></label
-                    ><label class="check-label consent"
-                        ><input v-model="form.consent" type="checkbox" /><span
-                            >Declaro que lo registrado es veraz y autorizo el
-                            tratamiento de mis datos para esta postulación. He
-                            revisado la
-                            <a
-                                :href="url('/ayuda#privacidad')"
-                                target="_blank"
-                                rel="noopener"
-                                >información de privacidad</a
-                            >.</span
-                        ></label
-                    >
-                </div>
             </fieldset>
             <div v-if="editable" class="row wrap form-section">
                 <button class="btn btn-outline" :disabled="form.processing">
@@ -438,7 +414,7 @@ function example(years, topDegree = "maestro") {
                     class="btn btn-primary"
                     :disabled="form.processing"
                 >
-                    Comprobar y pasar a documentos<Icon
+                    Guardar y continuar al Fólder A<Icon
                         name="ArrowRight"
                         :size="16"
                     />

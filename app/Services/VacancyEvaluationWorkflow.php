@@ -18,6 +18,17 @@ class VacancyEvaluationWorkflow
         return $vacancy->external_evaluation !== null && $vacancy->internal_evaluation !== null;
     }
 
+    public static function rubricSummary(Vacancy $vacancy): array
+    {
+        return array_map(fn (array $stage): array => [
+            'minimum' => $stage['minimum'],
+            'maximum' => $stage['maximum'],
+            'rubrics' => array_map(fn (array $rubric): array => array_intersect_key(
+                $rubric, array_flip(['key', 'name', 'max', 'guidance', 'items'])
+            ), $stage['rubrics']),
+        ], array_filter(['external' => $vacancy->external_evaluation, 'internal' => $vacancy->internal_evaluation]));
+    }
+
     public static function template(Application $application): ?array
     {
         $vacancy = $application->vacancy;
@@ -93,9 +104,31 @@ class VacancyEvaluationWorkflow
         return true;
     }
 
+    public static function internalEvidenceAvailable(Application $application): bool
+    {
+        return isset($application->vacancy->stage_publications['external']) && self::externalPassed($application);
+    }
+
     public static function evidence(Application $application): array
     {
         return $application->form_data['merits'] ?? [];
+    }
+
+    public static function curriculumIndex(Application $application): array
+    {
+        $criteria = self::criteria($application->vacancy);
+        $order = array_flip(array_keys($criteria));
+
+        return collect(self::evidence($application))
+            ->sortBy(fn (array $entry): int => $order[$entry['criterion']] ?? PHP_INT_MAX)
+            ->map(fn (array $entry): array => [
+                'id' => $entry['id'],
+                'rubric' => $criteria[$entry['criterion']]['rubric_name'] ?? 'Otros méritos',
+                'criterion' => $criteria[$entry['criterion']]['name'] ?? $entry['criterion'],
+                'description' => $entry['description'],
+                'quantity' => $entry['quantity'],
+                'document_key' => ($entry['reuse'] ?? null) ?: 'merito_'.$entry['id'],
+            ])->values()->all();
     }
 
     public static function applicantView(Application $application): Application

@@ -52,6 +52,16 @@ class RecruitmentWorkflowTest extends TestCase
         $this->get('/panel')->assertRedirect(route('login'));
     }
 
+    public function test_signing_in_from_a_public_vacancy_returns_to_that_vacancy(): void
+    {
+        $applicant = User::factory()->create();
+        $vacancy = Vacancy::factory()->create();
+
+        $this->get(route('login', ['plaza' => $vacancy->id]))->assertOk();
+        $this->post(route('login'), ['email' => $applicant->email, 'password' => 'password'])
+            ->assertRedirect(route('vacancies.show', $vacancy));
+    }
+
     public static function restrictedRoles(): array
     {
         return ['postulante' => ['postulante'], 'jurado' => ['jurado'], 'gestor' => ['gestor']];

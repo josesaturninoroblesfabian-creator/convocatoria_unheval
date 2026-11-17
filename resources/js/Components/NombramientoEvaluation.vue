@@ -14,6 +14,7 @@ const props = defineProps({
     merits: Array,
     meritCriteria: Object,
     documents: Array,
+    documentRequirements: Array,
 });
 const byVacancy = computed(() => props.template.byVacancy);
 
@@ -119,10 +120,17 @@ const documentFor = (entry) =>
         (document) =>
             document.requirement_key === (entry.reuse || "merito_" + entry.id),
     );
-const syllabusDocument = computed(() =>
-    props.documents?.find(
-        (document) => document.requirement_key === "silabo_interno",
-    ),
+const syllabusDocuments = computed(() =>
+    props.documents.flatMap((document) => {
+        const requirement = props.documentRequirements.find(
+            (item) =>
+                item.key === document.requirement_key &&
+                item.section === "internos",
+        );
+        return requirement
+            ? [{ id: document.id, label: requirement.label }]
+            : [];
+    }),
 );
 const scale = (criterion, item) =>
     item.levels ?? criterion.scale.map((value) => ({ points: value }));
@@ -474,17 +482,21 @@ function refresh() {
                         >
                             {{ criterion.guidance }}
                         </span>
-                        <button
-                            v-if="
-                                criterion.key === 'silabo' && syllabusDocument
-                            "
-                            type="button"
-                            class="text-link"
-                            @click="$emit('view-document', syllabusDocument.id)"
+                        <div
+                            v-if="criterion.key === 'silabo'"
+                            class="grid gap-2"
                         >
-                            Ver sílabo adjunto en el visor
-                            <Icon name="Eye" :size="14" />
-                        </button>
+                            <button
+                                v-for="document in syllabusDocuments"
+                                :key="document.id"
+                                type="button"
+                                class="text-link"
+                                @click="$emit('view-document', document.id)"
+                            >
+                                Ver {{ document.label }}
+                                <Icon name="Eye" :size="14" />
+                            </button>
+                        </div>
                     </component>
                     <template v-if="criterion.items">
                         <div
@@ -614,9 +626,7 @@ function refresh() {
                         </div>
                         <p v-if="group.saved?.[criterion.key] != null">
                             Subtotal
-                            {{
-                                points.format(group.saved[criterion.key])
-                            }}
+                            {{ points.format(group.saved[criterion.key]) }}
                             puntos
                         </p>
                     </div>

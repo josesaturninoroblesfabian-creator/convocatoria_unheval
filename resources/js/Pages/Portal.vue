@@ -300,24 +300,24 @@ function tab(value) {
                     <div
                         v-for="(step, i) in [
                             {
-                                icon: 'Users',
-                                title: 'Crea tu cuenta',
-                                text: 'Registra tus datos personales y accede a tu espacio de postulante.',
+                                icon: 'Search',
+                                title: 'Selecciona tu plaza',
+                                text: 'Consulta el perfil, las bases, los aspectos de evaluación y el cronograma.',
                             },
                             {
-                                icon: 'Search',
-                                title: 'Encuentra tu plaza',
-                                text: 'Revisa el perfil profesional, las bases y el cronograma del concurso.',
+                                icon: 'Users',
+                                title: 'Completa tus datos y perfil',
+                                text: 'Crea tu cuenta y registra la formación, experiencia y otros requisitos que solicita la plaza.',
                             },
                             {
                                 icon: 'Upload',
-                                title: 'Completa tu formulario',
-                                text: 'Declara tu formación y experiencia, comprueba los mínimos y adjunta sus sustentos.',
+                                title: 'Prepara los dos fólderes',
+                                text: 'Presenta la solicitud y las declaraciones en el Fólder A, y el currículo documentado en el Fólder B.',
                             },
                             {
                                 icon: 'ClipboardCheck',
-                                title: 'Sigue tu postulación',
-                                text: 'Conserva tu cargo de recepción y consulta el estado desde tu panel.',
+                                title: 'Envía y sigue tu postulación',
+                                text: 'Revisa ambos fólderes, envía el expediente y consulta el cargo y los resultados desde tu panel.',
                             },
                         ]"
                         :key="i"

@@ -12,6 +12,9 @@ const props = defineProps({
     vacancy: Object,
     preview: Boolean,
     stagePublications: [Object, Array],
+    rubricSummary: [Object, Array],
+    applicationRequirements: [Object, Array],
+    ownApplication: Object,
 });
 const stageResults = {
     APTO: "Apto",
@@ -29,11 +32,16 @@ const timeline = computed(() =>
     ),
 );
 const localDate = (value) => date(value + "-05:00", true);
+const requirementSections = {
+    administrativos: "Fólder A · Documentos administrativos",
+    curriculo: "Fólder B · Sustentos del perfil",
+    internos: "Fólder B · Sílabos",
+};
 const page = usePage();
 const busy = ref(false);
 function apply() {
     if (!page.props.auth.user) {
-        router.visit(url("/ingresar"));
+        router.visit(url(`/ingresar?plaza=${props.vacancy.id}`));
         return;
     }
     busy.value = true;
@@ -191,29 +199,110 @@ function apply() {
                         {{ vacancy.professional_profile }}
                     </p>
                 </section>
-                <section v-if="vacancy.requirements.length" class="panel">
+                <section
+                    v-for="(stage, key) in rubricSummary"
+                    :key="key"
+                    class="panel"
+                >
                     <div class="panel-heading">
-                        <Icon name="GraduationCap" />
+                        <Icon name="ClipboardCheck" />
                         <h2>
                             {{
-                                vacancy.professional_profile
-                                    ? "Documentos requeridos para postular"
-                                    : "Perfil y documentos requeridos"
+                                key === "external"
+                                    ? "Evaluación de aspectos externos"
+                                    : "Evaluación de aspectos internos"
                             }}
                         </h2>
                     </div>
-                    <div
-                        v-for="(r, i) in vacancy.requirements"
-                        :key="r.key"
-                        class="requirement"
+                    <p>
+                        Mínimo {{ stage.minimum }} de
+                        {{ stage.maximum }} puntos.
+                    </p>
+                    <details v-for="rubric in stage.rubrics" :key="rubric.key">
+                        <summary>
+                            {{ rubric.name }} · hasta {{ rubric.max }} pts
+                        </summary>
+                        <p v-if="rubric.guidance">{{ rubric.guidance }}</p>
+                        <div
+                            v-for="item in rubric.items"
+                            :key="item.key"
+                            class="schedule-row"
+                        >
+                            <span>{{ item.name }}</span>
+                            <b v-if="item.points != null"
+                                >{{ item.points }} pts · {{ item.unit }}</b
+                            >
+                            <b v-else-if="item.levels?.length"
+                                >Hasta
+                                {{
+                                    Math.max(
+                                        ...item.levels.map(
+                                            (level) => level.points,
+                                        ),
+                                    )
+                                }}
+                                pts</b
+                            >
+                        </div>
+                    </details>
+                </section>
+                <section class="panel">
+                    <div class="panel-heading">
+                        <Icon name="FolderOpen" />
+                        <h2>Guía de presentación del expediente</h2>
+                    </div>
+                    <ol class="list-decimal pl-5 grid gap-2">
+                        <li>
+                            <strong>Datos y perfil.</strong> Completa tus datos
+                            y registra los requisitos del perfil que solicita la
+                            plaza.
+                        </li>
+                        <li>
+                            <strong>Fólder A.</strong> Adjunta la solicitud, las
+                            declaraciones y los documentos administrativos
+                            configurados.
+                        </li>
+                        <li>
+                            <strong>Fólder B.</strong> Adjunta los sustentos del
+                            perfil y registra tus méritos. Si la plaza solicita
+                            sílabos, cárgalos en aspectos internos.
+                        </li>
+                        <li>
+                            <strong>Revisión y envío.</strong> Comprueba ambos
+                            fólderes, confirma el envío dentro del plazo y
+                            conserva tu cargo.
+                        </li>
+                    </ol>
+                    <template
+                        v-for="(heading, section) in requirementSections"
+                        :key="section"
                     >
-                        <span>{{ String(i + 1).padStart(2, "0") }}</span>
-                        <p>
-                            {{ r.label }}
-                            <small>{{
-                                r.required ? "Obligatorio" : "Opcional"
-                            }}</small>
-                        </p>
+                        <details
+                            v-if="applicationRequirements?.[section]?.length"
+                            class="form-section"
+                        >
+                            <summary>{{ heading }}</summary>
+                            <div
+                                v-for="requirement in applicationRequirements[
+                                    section
+                                ]"
+                                :key="requirement.key"
+                                class="schedule-row"
+                            >
+                                <span>{{ requirement.label }}</span
+                                ><b>{{
+                                    requirement.required
+                                        ? "Obligatorio"
+                                        : "Opcional"
+                                }}</b>
+                            </div>
+                        </details>
+                    </template>
+                    <div class="form-section">
+                        <Link :href="url('/ayuda')" class="text-link"
+                            >Consultar la guía del postulante
+                            <Icon name="ArrowUpRight" :size="15"
+                        /></Link>
                     </div>
                 </section>
                 <section class="panel">
@@ -326,9 +415,36 @@ function apply() {
                                 ><small>Hora de Perú (UTC−5)</small>
                             </div>
                         </div>
+                        <Link
+                            v-if="!preview && ownApplication"
+                            :href="
+                                url('/mis-postulaciones/' + ownApplication.id)
+                            "
+                            class="btn btn-primary full"
+                        >
+                            {{
+                                ownApplication.submitted_at ||
+                                !isOpen(vacancy.recruitment_call)
+                                    ? "Ver mi expediente"
+                                    : "Continuar mi borrador"
+                            }}
+                            <Icon name="ArrowRight" :size="17" />
+                        </Link>
+                        <p
+                            v-if="
+                                !preview &&
+                                ownApplication &&
+                                ownApplication.vacancy_id !== vacancy.id
+                            "
+                            class="footnote"
+                        >
+                            Tu expediente corresponde a otra plaza de esta
+                            convocatoria.
+                        </p>
                         <button
                             v-if="
                                 !preview &&
+                                !ownApplication &&
                                 vacancy.recruitment_call
                                     .accepting_applications &&
                                 (!$page.props.auth.user ||
@@ -341,14 +457,17 @@ function apply() {
                             {{ busy ? "Preparando…" : "Preparar mi postulación"
                             }}<Icon name="ArrowRight" :size="17" />
                         </button>
-                        <div v-else-if="!preview" class="notice">
+                        <div
+                            v-else-if="!preview && !ownApplication"
+                            class="notice"
+                        >
                             {{
                                 isOpen(vacancy.recruitment_call)
                                     ? "Ingresa con una cuenta de postulante."
                                     : "La inscripción de esta convocatoria está cerrada."
                             }}
                         </div>
-                        <p v-if="!preview" class="footnote">
+                        <p v-if="!preview && !ownApplication" class="footnote">
                             Al iniciar creas un borrador. Tu postulación se
                             registra cuando confirmas el envío del expediente.
                         </p>

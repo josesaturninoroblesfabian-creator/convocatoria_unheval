@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\RegisterRequest;
 use App\Models\User;
+use App\Models\Vacancy;
 use App\Services\ProfileRegistryLookup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -18,8 +19,13 @@ use Inertia\Response;
 
 class AuthController extends Controller
 {
-    public function login(): Response
+    public function login(Request $request): Response
     {
+        $vacancyId = $request->integer('plaza');
+        if ($vacancyId > 0 && Vacancy::whereKey($vacancyId)->whereRelation('recruitmentCall', 'status', 'PUBLICADA')->exists()) {
+            $request->session()->put('url.intended', route('vacancies.show', $vacancyId));
+        }
+
         return Inertia::render('Auth', ['mode' => 'login']);
     }
 
@@ -55,7 +61,7 @@ class AuthController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
-        return redirect()->route('dashboard')->with('success', 'Tu cuenta está lista. Ya puedes preparar tu expediente.');
+        return redirect()->intended(route('dashboard'))->with('success', 'Tu cuenta está lista. Ya puedes preparar tu expediente.');
     }
 
     public function logout(Request $request): RedirectResponse

@@ -14,6 +14,7 @@ const props = defineProps({
     contractHours: Object,
     faculties: Array,
     hasEvaluation: Boolean,
+    maxRequirements: Number,
 });
 const firstVacancy = computed(() => !props.call);
 const callPath = computed(() =>
@@ -86,6 +87,27 @@ const aptitude = useForm({
 });
 const bonusKey = "bonificacion_discapacidad";
 const syllabusKey = "silabo_interno";
+const isSyllabus = (key) =>
+    key === "silabo" ||
+    key === syllabusKey ||
+    key.startsWith(`${syllabusKey}_`);
+const hasSyllabus = computed(() =>
+    aptitude.requirements.some((item) => isSyllabus(item.key)),
+);
+const syllabusCourses = computed(() =>
+    (props.vacancy?.courses ?? []).map((course, index) => ({
+        key: `${syllabusKey}_curso_${index + 1}`,
+        label: `Sílabo · ${course.code} · ${course.name}`,
+        required: false,
+    })),
+);
+const canLoadSyllabusCourses = computed(
+    () =>
+        !hasSyllabus.value &&
+        syllabusCourses.value.length > 0 &&
+        aptitude.requirements.length + syllabusCourses.value.length <=
+            props.maxRequirements,
+);
 function addRequirement(bonus = false) {
     aptitude.requirements.push({
         key: bonus ? bonusKey : screeningRecordId(),
@@ -102,35 +124,77 @@ function addSyllabus() {
 }
 function loadFolderABase() {
     const base = [
-        {
-            key: "solicitud",
-            label: "Solicitud de inscripción y declaraciones juradas (Fólder A)",
-            required: true,
-        },
-        {
-            key: "habilitacion",
-            label: "Constancia de colegiatura y habilitación profesional vigente",
-            required: true,
-        },
-        {
-            key: bonusKey,
-            label: "Sustento de discapacidad para bonificación final",
-            required: false,
-        },
-        {
-            key: syllabusKey,
-            label: "Sílabo o planeación didáctica",
-            required: false,
-        },
-    ];
-    for (const item of base) {
-        if (
-            aptitude.requirements.length < 30 &&
-            !aptitude.requirements.some((existing) => existing.key === item.key)
-        ) {
-            aptitude.requirements.push({ ...item });
-        }
+        [
+            "solicitud_inscripcion",
+            "Solicitud de inscripción dirigida al decano",
+            true,
+        ],
+        [
+            "dj_incompatibilidad",
+            "Declaración jurada de incompatibilidad horaria, remunerativa o de cargos",
+            true,
+        ],
+        [
+            "dj_reglamento_perfil",
+            "Declaración jurada de conocimiento del reglamento y cumplimiento del perfil",
+            true,
+        ],
+        [
+            "dj_nepotismo",
+            "Declaración jurada de ausencia de incompatibilidad por parentesco",
+            true,
+        ],
+        [
+            "dj_inhabilitados",
+            "Declaración jurada sobre el Registro de Inhabilitados",
+            true,
+        ],
+        [
+            "dj_impedimentos",
+            "Declaración jurada de ausencia de otros impedimentos para trabajar en una institución pública",
+            true,
+        ],
+        [
+            "habilitacion",
+            "Constancia de habilitación profesional, cuando corresponda",
+            false,
+        ],
+        [
+            "dj_delitos",
+            "Declaración jurada sobre delitos previstos en las bases",
+            true,
+        ],
+        [
+            "dj_separacion",
+            "Declaración jurada sobre separación por hostigamiento sexual, terrorismo o violación sexual",
+            true,
+        ],
+        [bonusKey, "Sustento de discapacidad para bonificación final", false],
+        ["identidad", "Copia del DNI", true],
+        [
+            "fotografia",
+            "Fotografía actual tamaño pasaporte, en fondo blanco (en PDF)",
+            true,
+        ],
+    ].map(([key, label, required]) => ({ key, label, required }));
+    const retained = aptitude.requirements.filter(
+        (item) =>
+            item.key !== "solicitud" ||
+            item.label !==
+                "Solicitud de inscripción y declaraciones juradas (Fólder A)",
+    );
+    const additions = base.filter(
+        (item) => !retained.some((existing) => existing.key === item.key),
+    );
+    if (retained.length + additions.length > props.maxRequirements) {
+        aptitude.setError(
+            "requirements",
+            "Quita los requisitos sobrantes antes de cargar la lista completa.",
+        );
+        return;
     }
+    aptitude.clearErrors("requirements");
+    aptitude.requirements = [...retained, ...additions];
 }
 const removing = useForm({});
 const fileInput = ref(null);
@@ -554,11 +618,24 @@ function removeDocument() {
                     /></label>
                     <label>
                         Ventana de revisión
-                        <select v-model="event.stage">
+                        <select
+                            v-model="event.stage"
+                            @change="event.purpose = null"
+                        >
                             <option :value="null">Actividad informativa</option>
                             <option value="aptitude">Aptitud</option>
                             <option value="external">Aspectos externos</option>
                             <option value="internal">Aspectos internos</option>
+                        </select>
+                    </label>
+                    <label v-if="!event.stage">
+                        Tipo de aviso
+                        <select v-model="event.purpose">
+                            <option :value="null">Actividad general</option>
+                            <option value="citacion">
+                                Citación de aspectos internos
+                            </option>
+                            <option value="reclamo">Canal de reclamos</option>
                         </select>
                     </label>
                     <div class="form-grid">
@@ -579,9 +656,11 @@ function removeDocument() {
                         /></label>
                     </div>
                     <label
-                        >Indicaciones <small>Opcional</small
+                        >Indicaciones públicas
+                        <small v-if="!event.purpose">Opcional</small
                         ><input
                             v-model="event.detail"
+                            :required="Boolean(event.purpose)"
                             maxlength="300"
                             placeholder="Lugar, enlace o instrucciones"
                     /></label>
@@ -597,6 +676,7 @@ function removeDocument() {
                             ends_at: '',
                             detail: '',
                             stage: null,
+                            purpose: null,
                         })
                     "
                 >
@@ -708,7 +788,7 @@ function removeDocument() {
                 })
             "
         >
-            <h2>Sustentos de aptitud y filtro de Etapa 1 (Fólder A)</h2>
+            <h2>Perfil mínimo y documentos de postulación</h2>
             <p class="muted">
                 Configura el filtro automático de requisitos mínimos del perfil
                 (grado académico, años desde el bachiller, colegiatura) y los
@@ -717,7 +797,12 @@ function removeDocument() {
             </p>
             <Errors :errors="aptitude.errors" />
             <ScreeningEditor v-model="aptitude.screening_rules" />
-            <h3 class="form-section">Documentos del Fólder A y anexos</h3>
+            <h3 class="form-section">Fólder A y sílabos del Fólder B</h3>
+            <p class="muted">
+                La lista de referencia proviene de la guía de nombramiento.
+                Ajusta los documentos obligatorios según las bases de esta
+                plaza.
+            </p>
             <div
                 v-for="(item, index) in aptitude.requirements"
                 :key="item.key"
@@ -747,7 +832,7 @@ function removeDocument() {
             </div>
             <div class="row wrap">
                 <button
-                    v-if="aptitude.requirements.length < 30"
+                    v-if="aptitude.requirements.length < maxRequirements"
                     type="button"
                     class="btn btn-outline"
                     @click="addRequirement()"
@@ -755,7 +840,7 @@ function removeDocument() {
                     Añadir sustento
                 </button>
                 <button
-                    v-if="aptitude.requirements.length < 30"
+                    v-if="aptitude.requirements.length < maxRequirements"
                     type="button"
                     class="btn btn-outline"
                     @click="loadFolderABase"
@@ -764,7 +849,7 @@ function removeDocument() {
                 </button>
                 <button
                     v-if="
-                        aptitude.requirements.length < 30 &&
+                        aptitude.requirements.length < maxRequirements &&
                         !aptitude.requirements.some(
                             (item) => item.key === bonusKey,
                         )
@@ -777,16 +862,22 @@ function removeDocument() {
                 </button>
                 <button
                     v-if="
-                        aptitude.requirements.length < 30 &&
-                        !aptitude.requirements.some(
-                            (item) => item.key === syllabusKey,
-                        )
+                        aptitude.requirements.length < maxRequirements &&
+                        !hasSyllabus
                     "
                     type="button"
                     class="btn btn-outline"
                     @click="addSyllabus"
                 >
                     Añadir sílabo para internos
+                </button>
+                <button
+                    v-if="canLoadSyllabusCourses"
+                    type="button"
+                    class="btn btn-outline"
+                    @click="aptitude.requirements.push(...syllabusCourses)"
+                >
+                    Añadir sílabos por curso
                 </button>
                 <button class="btn btn-primary" :disabled="aptitude.processing">
                     Guardar sustentos

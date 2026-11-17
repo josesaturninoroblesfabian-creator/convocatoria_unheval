@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\RecruitmentCall;
 use App\Models\Vacancy;
+use App\Services\ApplicantScreening;
 use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -34,12 +35,21 @@ class PortalController extends Controller
         return Inertia::render('Portal', ['vacancies' => $query->orderByDesc('id')->paginate(8)->withQueryString(), 'filters' => $filters, 'faculties' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', '!=', 'BORRADOR'))->distinct()->orderBy('faculty')->pluck('faculty'), 'stats' => ['open' => RecruitmentCall::where('status', 'PUBLICADA')->where('opens_at', '<=', now())->where('closes_at', '>=', now())->count(), 'vacancies' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', 'PUBLICADA')->where('opens_at', '<=', now())->where('closes_at', '>=', now()))->count(), 'faculties' => Vacancy::whereHas('recruitmentCall', fn ($q) => $q->where('status', '!=', 'BORRADOR'))->distinct()->count('faculty')]]);
     }
 
-    public function show(Vacancy $vacancy): Response
+    public function show(Request $request, Vacancy $vacancy): Response
     {
         $vacancy->load('recruitmentCall');
         abort_if($vacancy->recruitmentCall->status === 'BORRADOR', 404);
 
-        return Inertia::render('Vacancy', ['vacancy' => $vacancy, 'stagePublications' => $vacancy->stage_publications ?? []]);
+        $application = $request->user()?->role === 'postulante'
+            ? $request->user()->applications()->where('recruitment_call_id', $vacancy->recruitment_call_id)->first(['id', 'vacancy_id', 'submitted_at']) : null;
+
+        return Inertia::render('Vacancy', [
+            'vacancy' => $vacancy,
+            'stagePublications' => $vacancy->stage_publications ?? [],
+            'rubricSummary' => VacancyEvaluationWorkflow::rubricSummary($vacancy),
+            'applicationRequirements' => ApplicantScreening::groupVacancyRequirements($vacancy),
+            'ownApplication' => $application,
+        ]);
     }
 
     public function vacancyDocument(Request $request, Vacancy $vacancy, string $document): StreamedResponse

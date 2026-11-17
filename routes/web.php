@@ -45,6 +45,8 @@ Route::middleware('auth')->group(function () {
         Route::post('/mis-postulaciones/{application}/documentos', [ApplicationController::class, 'upload'])->middleware('throttle:30,1')->name('applications.upload');
         Route::post('/mis-postulaciones/{application}/enviar', [ApplicationController::class, 'submit'])->name('applications.submit');
         Route::get('/mis-postulaciones/{application}/cargo', [ApplicationController::class, 'receipt'])->name('applications.receipt');
+        Route::get('/mis-postulaciones/{application}/curriculo', [ApplicationController::class, 'curriculum'])->name('applications.curriculum');
+        Route::get('/mis-postulaciones/{application}/solicitud', [ApplicationController::class, 'registrationRequest'])->name('applications.registration-request');
     });
     Route::middleware('role:administrador,gestor,jurado')->group(function () {
         Route::get('/expedientes', [ManagementController::class, 'applications'])->name('review.index');

@@ -26,16 +26,24 @@ import { url } from "../lib/ui";
                             text: 'Crea una cuenta con tu DNI, un correo al que tengas acceso y tu teléfono. Verifica tu información antes de comenzar.',
                         },
                         {
-                            title: 'Prepara tus documentos',
-                            text: 'Inicia el borrador de una plaza. Declara tu grado, fecha de bachiller, periodos de experiencia y cursos. Guarda y calcula: si faltan mínimos, corrige el formulario antes de avanzar. Después adjunta un PDF por cada sustento, de hasta 5 MB.',
+                            title: 'Inicia el expediente y completa el perfil',
+                            text: 'Selecciona la plaza y confirma tus datos de contacto. Cuando la plaza solicite el formulario de perfil, guarda la formación, experiencia y los demás requisitos declarados antes de pasar al Fólder A.',
+                        },
+                        {
+                            title: 'Fólder A · Solicitud y declaraciones',
+                            text: 'Adjunta un PDF de hasta 5 MB por documento administrativo. Usa la solicitud prellenada si aparece y presenta cada declaración en la casilla indicada por las bases.',
+                        },
+                        {
+                            title: 'Fólder B · Currículo documentado',
+                            text: 'Adjunta los sustentos del perfil. En plazas con rúbrica, registra tus méritos, vincula los PDF y comprueba el CV e índice. Adjunta los sílabos en aspectos internos cuando la plaza los solicite.',
                         },
                         {
                             title: 'Revisa y confirma el envío',
-                            text: 'Guarda tu declaración de veracidad, comprueba que los documentos obligatorios estén adjuntos y confirma el envío. Un borrador no cuenta como postulación enviada.',
+                            text: 'Revisa los pendientes de ambos fólderes, acepta la declaración de veracidad y envía un solo expediente dentro del plazo. Un borrador aún está pendiente de envío.',
                         },
                         {
                             title: 'Conserva tu cargo y realiza el seguimiento',
-                            text: 'Tras enviar, abre tu cargo de recepción y guárdalo como PDF desde el navegador. El expediente ya no se puede editar. Consulta su estado en Mis postulaciones.',
+                            text: 'Imprime o guarda el cargo como PDF. Abre Mis postulaciones para consultar la aptitud, las observaciones, los puntajes publicados y los avisos de la plaza.',
                         },
                     ]"
                     :key="s.title"
