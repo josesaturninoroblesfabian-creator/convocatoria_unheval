@@ -9,6 +9,7 @@ const props = defineProps({
     call: Object,
     hasVacancies: Boolean,
     nombramientoTemplate: Object,
+    standardSchedule: Array,
 });
 const referenceMode = "nombramiento_referencia";
 const localDate = (value) =>
@@ -94,6 +95,11 @@ function submit() {
     if (confirmingModeChange.value) return;
     form.put(url("/gestion/convocatorias/" + props.call.id));
 }
+
+function loadStandardSchedule() {
+    if (!props.standardSchedule?.length) return;
+    form.schedule = props.standardSchedule.map((item) => ({ ...item }));
+}
 </script>
 <template>
     <AppLayout
@@ -116,7 +122,11 @@ function submit() {
                     ><label
                         >Modalidad<select
                             v-model="form.modality"
-                            :disabled="hasVacancies || usesTemplate || confirmingModeChange"
+                            :disabled="
+                                hasVacancies ||
+                                usesTemplate ||
+                                confirmingModeChange
+                            "
                         >
                             <option value="NOMBRAMIENTO">Nombramiento</option>
                             <option value="CONTRATO">Contrato</option>
@@ -142,14 +152,24 @@ function submit() {
                         maxlength="180"
                         placeholder="Número de resolución de aprobación" /></label
                 ><label class="check-label"
-                    ><input v-model="form.is_demo" type="checkbox" />Es una
-                    convocatoria de demostración</label
+                    ><input
+                        v-model="form.is_demo"
+                        type="checkbox"
+                        :disabled="!$page.props.allowOfficial"
+                    />Es una convocatoria de demostración</label
                 >
                 <div class="notice">
-                    La versión actual habilita publicación y evaluación de
-                    procesos de demostración. Los procesos oficiales se
-                    conservan en borrador hasta implementar y validar su
-                    normativa específica.
+                    <template v-if="$page.props.allowOfficial">
+                        El modo oficial está habilitado. Revisa la normativa y
+                        el cronograma aprobados antes de publicar un proceso
+                        real.
+                    </template>
+                    <template v-else>
+                        Esta instalación publica y evalúa procesos de
+                        demostración. Para convocatorias oficiales, habilita
+                        <code>RECRUITMENT_ALLOW_OFFICIAL</code> y valida la
+                        normativa con la universidad.
+                    </template>
                 </div>
             </section>
             <section class="panel">
@@ -209,6 +229,20 @@ function submit() {
                 >
                     <Icon name="Plus" :size="15" />Añadir actividad
                 </button>
+                <button
+                    v-if="standardSchedule?.length"
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    @click="loadStandardSchedule"
+                >
+                    <Icon name="ClipboardList" :size="15" />Cargar cronograma
+                    estándar
+                </button>
+                <p class="muted">
+                    El cronograma estándar reproduce los 11 hitos del proceso
+                    oficial de concurso. Sustituye las actividades actuales y
+                    deja las fechas listas para completar.
+                </p>
             </section>
             <section v-if="hasVacancies && form.rubric.length" class="panel">
                 <div class="panel-heading">

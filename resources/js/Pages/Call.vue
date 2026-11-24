@@ -3,6 +3,7 @@ import { Link } from "@inertiajs/vue3";
 import PublicLayout from "../Layouts/PublicLayout.vue";
 import Icon from "../Components/Icon.vue";
 import Badge from "../Components/Badge.vue";
+import ProcessStepper from "../Components/ProcessStepper.vue";
 import { url, date, label } from "../lib/ui";
 defineProps({ call: Object });
 </script>
@@ -24,6 +25,7 @@ defineProps({ call: Object });
                 referencias de un concurso histórico; las fechas y reglas
                 configuradas aquí son de prueba.
             </div>
+            <ProcessStepper :call="call" />
             <section class="panel">
                 <h2>Información del proceso</h2>
                 <p>{{ call.description }}</p>
@@ -92,14 +94,19 @@ defineProps({ call: Object });
                 </div>
             </section>
             <section class="panel">
-                <h2>Cronograma</h2>
-                <div
-                    v-for="(activity, i) in call.schedule"
-                    :key="i"
-                    class="schedule-row"
-                >
-                    <b>{{ activity.label }}</b
-                    ><span>{{ activity.date }}</span>
+                <h2>Cronograma del proceso</h2>
+                <p class="muted">
+                    Hitos del concurso según lo aprobado por Consejo. Las fechas
+                    se actualizan si la comisión reprograma alguna etapa.
+                </p>
+                <div class="timeline">
+                    <div v-for="(activity, i) in call.schedule" :key="i">
+                        <span></span>
+                        <div>
+                            <strong>{{ i + 1 }}. {{ activity.label }}</strong>
+                            <p>{{ activity.date }}</p>
+                        </div>
+                    </div>
                 </div>
             </section>
         </div></PublicLayout

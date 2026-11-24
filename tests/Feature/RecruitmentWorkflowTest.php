@@ -230,6 +230,18 @@ class RecruitmentWorkflowTest extends TestCase
         $this->assertSame('PUBLICADA', $call->fresh()->status);
     }
 
+    public function test_manager_can_publish_an_official_call_when_enabled(): void
+    {
+        $this->freezeTime();
+        config(['recruitment.allow_official' => true]);
+        $manager = User::factory()->manager()->create();
+        $call = RecruitmentCall::factory()->draft()->create(['is_demo' => false]);
+        $vacancy = Vacancy::factory()->for($call)->create();
+        $vacancy->jurors()->attach(User::factory()->juror()->create());
+        $this->actingAs($manager)->post('/gestion/convocatorias/'.$call->id.'/etapa', ['status' => 'PUBLICADA'])->assertSessionHas('success');
+        $this->assertSame('PUBLICADA', $call->fresh()->status);
+    }
+
     public function test_jury_cannot_be_changed_after_receiving_an_application(): void
     {
         $this->freezeTime();

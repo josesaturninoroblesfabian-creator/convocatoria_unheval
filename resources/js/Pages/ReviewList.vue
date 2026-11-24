@@ -10,6 +10,7 @@ const props = defineProps({
     applications: Object,
     filters: Object,
     calls: Array,
+    stats: Object,
 });
 const sort = ref(props.filters.sort || "score");
 const q = ref(props.filters.q || "");
@@ -72,6 +73,19 @@ function filter() {
         <div v-if="sort === 'score'" class="notice">
             El puntaje declarado ordena los expedientes de prueba libre. La
             comisión verifica los sustentos antes de calificar.
+        </div>
+        <div v-if="stats" class="review-stats">
+            <span
+                ><b>{{ stats.total }}</b> expedientes</span
+            ><span class="is-received"
+                ><b>{{ stats.recibida }}</b> por verificar</span
+            ><span class="is-apto"
+                ><b>{{ stats.apto }}</b> aptos</span
+            ><span class="is-no-apto"
+                ><b>{{ stats.no_apto }}</b> no aptos</span
+            ><span class="is-evaluated"
+                ><b>{{ stats.evaluada }}</b> evaluados</span
+            >
         </div>
         <section class="panel">
             <div class="table-scroll">

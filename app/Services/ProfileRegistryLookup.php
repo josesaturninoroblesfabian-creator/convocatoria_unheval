@@ -27,8 +27,14 @@ class ProfileRegistryLookup
 
     private function isLocalRequest(Request $request): bool
     {
-        return config('services.profile_registry.enabled')
-            && app()->environment('local')
+        if (! config('services.profile_registry.enabled')) {
+            return false;
+        }
+        if (! config('services.profile_registry.restrict_to_local', true)) {
+            return true;
+        }
+
+        return app()->environment('local')
             && in_array($request->getHost(), ['localhost', '127.0.0.1', '[::1]'], true)
             && in_array($request->server('REMOTE_ADDR'), ['127.0.0.1', '::1'], true)
             && ! $request->headers->has('X-Forwarded-For')

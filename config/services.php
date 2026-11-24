@@ -39,6 +39,10 @@ return [
         'enabled' => env('PROFILE_REGISTRY_LOOKUP_ENABLED', false),
         'apisperu_token' => env('APISPERU_DNI_TOKEN'),
         'apisted_token' => env('APISTED_TOKEN'),
+        // Cuando es true (recomendado), las consultas externas solo se permiten
+        // desde el servidor local. Para producción, desactívalo y asegura los
+        // tokens y el límite de consultas antes de exponer el endpoint.
+        'restrict_to_local' => env('PROFILE_REGISTRY_RESTRICT_TO_LOCAL', true),
     ],
 
 ];

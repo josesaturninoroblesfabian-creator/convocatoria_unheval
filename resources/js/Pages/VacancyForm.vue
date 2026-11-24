@@ -58,6 +58,26 @@ const rowKeys = {
     schedule: form.schedule.map(screeningRecordId),
 };
 const attachment = useForm({ name: "", file: null });
+const step = ref(1);
+const totalSteps = 4;
+const stepTitles = [
+    "Identificación",
+    "Carga académica",
+    "Perfil profesional",
+    "Cronograma",
+];
+function nextStep() {
+    if (step.value < totalSteps) {
+        step.value += 1;
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+}
+function prevStep() {
+    if (step.value > 1) {
+        step.value -= 1;
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+}
 const initialScreening = props.vacancy?.screening_rules;
 const aptitude = useForm({
     requirements: (props.vacancy?.requirements ?? []).map((item) => ({
@@ -303,28 +323,27 @@ function removeDocument() {
             </p>
         </div>
 
-        <nav aria-label="Secciones de la ficha" class="row wrap gap-12">
-            <a href="#identificacion" class="btn btn-outline btn-sm"
-                >1. Identificación</a
+        <nav aria-label="Pasos de la ficha" class="wizard-steps" role="tablist">
+            <button
+                v-for="(title, i) in stepTitles"
+                :key="i"
+                type="button"
+                :class="{ active: step === i + 1, complete: step > i + 1 }"
+                :aria-current="step === i + 1 ? 'step' : undefined"
+                @click="step = i + 1"
             >
-            <a href="#carga-academica" class="btn btn-outline btn-sm"
-                >2. Carga académica</a
-            >
-            <a href="#perfil-profesional" class="btn btn-outline btn-sm"
-                >3. Perfil profesional</a
-            >
-            <a href="#cronograma" class="btn btn-outline btn-sm"
-                >4. Cronograma</a
-            >
-            <a href="#documentos" class="btn btn-outline btn-sm"
-                >5. Documentos</a
-            >
+                <span>
+                    <Icon v-if="step > i + 1" name="Check" :size="14" />
+                    <template v-else>{{ i + 1 }}</template>
+                </span>
+                {{ title }}
+            </button>
         </nav>
 
         <form class="editor-form" @submit.prevent="save">
             <Errors :errors="form.errors" />
 
-            <section id="identificacion" class="panel">
+            <section id="identificacion" v-show="step === 1" class="panel">
                 <div class="panel-heading">
                     <Icon name="BriefcaseBusiness" />
                     <h2>1. Identificación de la plaza</h2>
@@ -453,7 +472,7 @@ function removeDocument() {
                 </label>
             </section>
 
-            <section id="carga-academica" class="panel">
+            <section id="carga-academica" v-show="step === 2" class="panel">
                 <div class="panel-heading">
                     <Icon name="BookOpen" />
                     <h2>2. Carga académica</h2>
@@ -529,7 +548,7 @@ function removeDocument() {
                 </button>
             </section>
 
-            <section id="perfil-profesional" class="panel">
+            <section id="perfil-profesional" v-show="step === 3" class="panel">
                 <div class="panel-heading">
                     <Icon name="GraduationCap" />
                     <h2>3. Perfil profesional</h2>
@@ -551,7 +570,7 @@ function removeDocument() {
                 </label>
             </section>
 
-            <section id="cronograma" class="panel">
+            <section id="cronograma" v-show="step === 4" class="panel">
                 <div class="panel-heading">
                     <Icon name="CalendarDays" />
                     <h2>4. Cronograma de la plaza</h2>
@@ -684,21 +703,54 @@ function removeDocument() {
                 </button>
             </section>
 
-            <div class="row end wrap">
-                <label v-if="firstVacancy" class="check-label">
-                    <input v-model="form.is_demo" type="checkbox" />
-                    Convocatoria de demostración
-                </label>
-                <button class="btn btn-primary" :disabled="form.processing">
-                    <Icon name="Save" :size="17" />
-                    {{
-                        vacancy
-                            ? "Guardar cambios de la ficha"
-                            : firstVacancy
-                              ? "Guardar plaza y crear convocatoria"
-                              : "Guardar ficha de plaza"
-                    }}
+            <div class="form-wizard-nav">
+                <button
+                    type="button"
+                    class="btn btn-outline"
+                    :disabled="step === 1"
+                    @click="prevStep"
+                >
+                    <Icon name="ArrowLeft" :size="16" /> Anterior
                 </button>
+                <div class="row wrap">
+                    <button
+                        v-if="step < totalSteps"
+                        type="button"
+                        class="btn btn-primary"
+                        @click="nextStep"
+                    >
+                        Siguiente <Icon name="ArrowRight" :size="16" />
+                    </button>
+                    <template v-else>
+                        <label v-if="firstVacancy" class="check-label">
+                            <input
+                                v-model="form.is_demo"
+                                type="checkbox"
+                                :disabled="!$page.props.allowOfficial"
+                            />
+                            <span v-if="$page.props.allowOfficial">
+                                Convocatoria de demostración
+                            </span>
+                            <span v-else>
+                                Convocatoria de demostración (el modo oficial
+                                requiere habilitación)
+                            </span>
+                        </label>
+                        <button
+                            class="btn btn-primary"
+                            :disabled="form.processing"
+                        >
+                            <Icon name="Save" :size="17" />
+                            {{
+                                vacancy
+                                    ? "Guardar cambios de la ficha"
+                                    : firstVacancy
+                                      ? "Guardar plaza y crear convocatoria"
+                                      : "Guardar ficha de plaza"
+                            }}
+                        </button>
+                    </template>
+                </div>
             </div>
         </form>
 

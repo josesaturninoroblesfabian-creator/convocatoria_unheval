@@ -13,6 +13,7 @@ use App\Models\Vacancy;
 use App\Services\ApplicantScreening;
 use App\Services\NombramientoRubric;
 use App\Services\ProfileRegistryLookup;
+use App\Services\RecruitmentProcess;
 use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -155,6 +156,7 @@ class ManagementController extends Controller
             'call' => $recruitmentCall,
             'hasVacancies' => $recruitmentCall->vacancies()->exists(),
             'nombramientoTemplate' => $recruitmentCall->evaluation_template ?? NombramientoRubric::template(),
+            'standardSchedule' => RecruitmentProcess::standardSchedule(),
         ]);
     }
 
@@ -231,8 +233,8 @@ class ManagementController extends Controller
                 if ($hasRubrics && $vacancies->contains(fn (Vacancy $vacancy): bool => ! VacancyEvaluationWorkflow::configured($vacancy))) {
                     throw ValidationException::withMessages(['status' => 'La publicación queda pendiente hasta completar el flujo de evaluación por plaza.']);
                 }
-                if (! $call->is_demo) {
-                    throw ValidationException::withMessages(['status' => 'La publicación de procesos oficiales está pendiente de implementar y validar la normativa específica de nombramiento. Usa una convocatoria de demostración.']);
+                if (! $call->is_demo && ! config('recruitment.allow_official')) {
+                    throw ValidationException::withMessages(['status' => 'La publicación de procesos oficiales requiere habilitar RECRUITMENT_ALLOW_OFFICIAL y validar la normativa con la universidad.']);
                 }
                 if (! $call->vacancies()->exists() || $call->vacancies()->doesntHave('jurors')->exists()) {
                     throw ValidationException::withMessages(['status' => 'Añade al menos una plaza y asigna jurados a todas las plazas.']);
@@ -300,12 +302,21 @@ class ManagementController extends Controller
         if (! empty($filters['call'])) {
             $query->where('recruitment_call_id', $filters['call']);
         }
-        if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
-        }
         if (! empty($filters['q'])) {
             $term = $filters['q'];
             $query->where(fn ($q) => $q->where('reference', 'like', "%{$term}%")->orWhereHas('user', fn ($q) => $q->where('name', 'like', "%{$term}%")));
+        }
+
+        $stats = [
+            'total' => (clone $query)->count(),
+            'recibida' => (clone $query)->where('status', 'RECIBIDA')->count(),
+            'apto' => (clone $query)->where('status', 'APTO')->count(),
+            'no_apto' => (clone $query)->where('status', 'NO_APTO')->count(),
+            'evaluada' => (clone $query)->where('status', 'EVALUADA')->count(),
+        ];
+
+        if (! empty($filters['status'])) {
+            $query->where('status', $filters['status']);
         }
 
         if (($filters['sort'] ?? 'score') === 'score') {
@@ -316,6 +327,7 @@ class ManagementController extends Controller
             'applications' => $query->latest('submitted_at')->orderByDesc('id')->paginate(15)->withQueryString(),
             'calls' => $calls->latest('id')->get(['id', 'code', 'title']),
             'filters' => $filters,
+            'stats' => $stats,
         ]);
     }
 

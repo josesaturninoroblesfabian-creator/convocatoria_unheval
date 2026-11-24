@@ -38,6 +38,10 @@ import {
     LockKeyhole,
     Filter,
     Sparkles,
+    Megaphone,
+    ListChecks,
+    Award,
+    ClipboardList,
 } from "@lucide/vue";
 defineProps({ name: String, size: { type: Number, default: 20 } });
 const icons = {
@@ -79,6 +83,10 @@ const icons = {
     LockKeyhole,
     Filter,
     Sparkles,
+    Megaphone,
+    ListChecks,
+    Award,
+    ClipboardList,
 };
 </script>
 <template>

@@ -128,8 +128,8 @@ class ReviewController extends Controller
             $call = RecruitmentCall::lockForUpdate()->findOrFail($application->recruitment_call_id);
             $locked = Application::lockForUpdate()->findOrFail($application->id);
             abort_unless($call->status === 'EN_EVALUACION' && $locked->status === 'APTO', 409);
-            if (! $call->is_demo) {
-                throw ValidationException::withMessages(['scores' => 'El motor de evaluación oficial debe validarse antes de calificar procesos reales.']);
+            if (! $call->is_demo && ! config('recruitment.allow_official')) {
+                throw ValidationException::withMessages(['scores' => 'La calificación de procesos oficiales requiere habilitar RECRUITMENT_ALLOW_OFFICIAL y validar la normativa con la universidad.']);
             }
             if (VacancyEvaluationWorkflow::template($locked)) {
                 $locked->setRelation('recruitmentCall', $call);

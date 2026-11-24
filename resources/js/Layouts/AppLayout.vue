@@ -45,7 +45,9 @@ const items = computed(() => [
           ]
         : [
               {
-                  label: juror.value ? "Expedientes asignados" : "Expedientes recibidos",
+                  label: juror.value
+                      ? "Expedientes asignados"
+                      : "Expedientes recibidos",
                   path: "/expedientes",
                   icon: "ClipboardCheck",
               },
@@ -80,8 +82,15 @@ const active = (path) =>
 <template>
     <Head :title="title" />
     <div class="app-layout" @keydown.esc="open = false">
-        <aside id="workspace-navigation" class="sidebar" :class="{ 'sidebar-open': open }">
-            <Link :href="url('/panel')" class="sidebar-brand" aria-label="UNHEVAL, inicio del panel"
+        <aside
+            id="workspace-navigation"
+            class="sidebar"
+            :class="{ 'sidebar-open': open }"
+        >
+            <Link
+                :href="url('/panel')"
+                class="sidebar-brand"
+                aria-label="UNHEVAL, inicio del panel"
                 ><img :src="url('/images/unheval.png')" alt="UNHEVAL" /><span
                     >CONVOCATORIAS DOCENTES</span
                 ></Link
@@ -101,7 +110,13 @@ const active = (path) =>
                     :key="item.path"
                     :href="url(item.path)"
                     :class="{ active: active(item.path) }"
-                    :aria-current="currentPath === url(item.path) ? 'page' : active(item.path) ? 'location' : undefined"
+                    :aria-current="
+                        currentPath === url(item.path)
+                            ? 'page'
+                            : active(item.path)
+                              ? 'location'
+                              : undefined
+                    "
                     @click="open = false"
                     ><Icon :name="item.icon" :size="20" />{{ item.label }}</Link
                 >
@@ -109,12 +124,17 @@ const active = (path) =>
             <div class="sidebar-bottom">
                 <div v-if="page.props.demo" class="demo-card">
                     <Icon name="Sparkles" :size="19" /><strong
-                        >Entorno de pruebas</strong
+                        >Modo demostración</strong
                     >
-                    <p>Los procesos demo no tienen validez oficial.</p>
+                    <p>
+                        Los procesos marcados como demostración no generan
+                        efectos oficiales.
+                    </p>
                 </div>
                 <Link :href="url('/')"
-                    ><Icon name="ExternalLink" :size="18" />{{ applicant ? "Buscar plazas" : "Ver portal público" }}</Link
+                    ><Icon name="ExternalLink" :size="18" />{{
+                        applicant ? "Buscar plazas" : "Ver portal público"
+                    }}</Link
                 ><Link :href="url('/ayuda')"
                     ><Icon name="HelpCircle" :size="18" />Centro de ayuda</Link
                 >
@@ -142,7 +162,9 @@ const active = (path) =>
                     <button
                         class="mobile-menu icon-btn"
                         type="button"
-                        :aria-label="open ? 'Cerrar navegación' : 'Abrir navegación'"
+                        :aria-label="
+                            open ? 'Cerrar navegación' : 'Abrir navegación'
+                        "
                         :aria-expanded="open"
                         aria-controls="workspace-navigation"
                         @click="open = !open"

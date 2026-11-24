@@ -5,6 +5,7 @@ import PublicLayout from "../Layouts/PublicLayout.vue";
 import Icon from "../Components/Icon.vue";
 import Badge from "../Components/Badge.vue";
 import Errors from "../Components/Errors.vue";
+import ProcessStepper from "../Components/ProcessStepper.vue";
 import { url, date, label } from "../lib/ui";
 import { useApplicationWindow } from "../lib/useApplicationWindow";
 const isOpen = useApplicationWindow();
@@ -88,6 +89,7 @@ function apply() {
         <div class="container detail-grid">
             <div>
                 <Errors :errors="$page.props.errors" />
+                <ProcessStepper :call="vacancy.recruitment_call" />
                 <section
                     v-for="(publication, stage) in stagePublications"
                     :key="stage"

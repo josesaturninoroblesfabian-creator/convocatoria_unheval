@@ -15,6 +15,7 @@ class HandleInertiaRequests extends Middleware
             'flash' => ['success' => fn () => $request->session()->get('success')],
             'baseUrl' => $request->getBaseUrl(),
             'demo' => config('recruitment.demo'),
+            'allowOfficial' => config('recruitment.allow_official'),
             'serverNow' => now()->toISOString(),
         ];
     }
