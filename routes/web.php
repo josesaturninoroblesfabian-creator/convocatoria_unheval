@@ -1,7 +1,10 @@
 <?php
 
+use App\Http\Controllers\ActaController;
+use App\Http\Controllers\AppealController;
 use App\Http\Controllers\ApplicationController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\JuryRecusalController;
 use App\Http\Controllers\ManagementController;
 use App\Http\Controllers\PortalController;
 use App\Http\Controllers\ProfileLookupController;
@@ -47,14 +50,19 @@ Route::middleware('auth')->group(function () {
         Route::get('/mis-postulaciones/{application}/cargo', [ApplicationController::class, 'receipt'])->name('applications.receipt');
         Route::get('/mis-postulaciones/{application}/curriculo', [ApplicationController::class, 'curriculum'])->name('applications.curriculum');
         Route::get('/mis-postulaciones/{application}/solicitud', [ApplicationController::class, 'registrationRequest'])->name('applications.registration-request');
+        Route::delete('/mis-postulaciones/{application}', [ApplicationController::class, 'destroy'])->name('applications.destroy');
+        Route::post('/mis-postulaciones/{application}/impugnaciones', [AppealController::class, 'store'])->name('appeals.store');
     });
     Route::middleware('role:administrador,gestor,jurado')->group(function () {
         Route::get('/expedientes', [ManagementController::class, 'applications'])->name('review.index');
         Route::get('/expedientes/{application}', [ReviewController::class, 'show'])->name('review.show');
+        Route::post('/impugnaciones/{appeal}/resolver', [AppealController::class, 'resolve'])->name('appeals.resolve');
+        Route::post('/actas/{acta}/firmar', [ActaController::class, 'sign'])->name('actas.sign');
     });
     Route::middleware('role:jurado')->group(function () {
         Route::post('/expedientes/{application}/aptitud', [ReviewController::class, 'eligibility'])->name('review.eligibility');
         Route::post('/expedientes/{application}/evaluacion', [ReviewController::class, 'evaluate'])->name('review.evaluate');
+        Route::post('/plazas/{vacancy}/abstencion', [JuryRecusalController::class, 'store'])->name('jury.recusals.store');
     });
     Route::middleware('role:administrador,gestor')->prefix('gestion')->group(function () {
         Route::get('/convocatorias', [ManagementController::class, 'calls'])->name('management.calls');
@@ -76,12 +84,16 @@ Route::middleware('auth')->group(function () {
         Route::put('/plazas/{vacancy}/formulario', [ManagementController::class, 'configureScreening'])->name('management.screening');
         Route::put('/plazas/{vacancy}/aptitud', [VacancyManagementController::class, 'aptitude'])->name('management.vacancies.aptitude');
         Route::put('/plazas/{vacancy}/cronograma', [VacancyManagementController::class, 'reschedule'])->name('management.vacancies.reschedule');
+        Route::delete('/plazas/{vacancy}', [VacancyManagementController::class, 'destroy'])->name('management.vacancies.destroy');
+        Route::delete('/convocatorias/{recruitmentCall}', [ManagementController::class, 'destroy'])->name('management.calls.destroy');
+        Route::post('/limpiar-prueba', [ManagementController::class, 'cleanupDemo'])->name('management.demo.cleanup');
         Route::post('/plazas/{vacancy}/publicar-etapa', [VacancyManagementController::class, 'publishStage'])->name('management.vacancies.publish-stage');
         Route::get('/plazas/{vacancy}/aspectos-externos', [VacancyEvaluationController::class, 'edit'])->defaults('stage', 'external')->name('management.vacancies.external.edit');
         Route::put('/plazas/{vacancy}/aspectos-externos', [VacancyEvaluationController::class, 'update'])->defaults('stage', 'external')->name('management.vacancies.external.update');
         Route::get('/plazas/{vacancy}/aspectos-internos', [VacancyEvaluationController::class, 'edit'])->defaults('stage', 'internal')->name('management.vacancies.internal.edit');
         Route::put('/plazas/{vacancy}/aspectos-internos', [VacancyEvaluationController::class, 'update'])->defaults('stage', 'internal')->name('management.vacancies.internal.update');
         Route::put('/plazas/{vacancy}/jurados', [ManagementController::class, 'assign'])->name('management.jurors');
+        Route::post('/abstenciones/{recusal}/resolver', [JuryRecusalController::class, 'resolve'])->name('jury.recusals.resolve');
         Route::get('/auditoria', [ManagementController::class, 'audit'])->name('audit');
     });
     Route::middleware('role:administrador')->prefix('gestion')->group(function () {

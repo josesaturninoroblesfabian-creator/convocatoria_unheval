@@ -45,4 +45,17 @@ return [
         'restrict_to_local' => env('PROFILE_REGISTRY_RESTRICT_TO_LOCAL', true),
     ],
 
+    // Integración futura con el SSO institucional y el escalafón docente.
+    // Se dejan los parámetros listos; el flujo de inicio de sesión debe
+    // implementarse contra el proveedor OIDC/SAML que la universidad publique.
+    'sso' => [
+        'enabled' => env('SSO_ENABLED', false),
+        'issuer' => env('SSO_ISSUER'),
+        'client_id' => env('SSO_CLIENT_ID'),
+        'client_secret' => env('SSO_CLIENT_SECRET'),
+        'redirect' => env('SSO_REDIRECT_URI'),
+        'escalafon_endpoint' => env('ESCALAFON_ENDPOINT'),
+        'escalafon_token' => env('ESCALAFON_TOKEN'),
+    ],
+
 ];

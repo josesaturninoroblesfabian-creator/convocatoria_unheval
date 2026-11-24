@@ -44,4 +44,9 @@ class Application extends Model
     {
         return $this->hasMany(Evaluation::class);
     }
+
+    public function appeals(): HasMany
+    {
+        return $this->hasMany(Appeal::class);
+    }
 }

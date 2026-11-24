@@ -19,6 +19,8 @@ const props = defineProps({
     profileCredentials: Array,
     meritCriteria: Object,
     evaluationStatus: Object,
+    appeals: Array,
+    appealEligibility: Object,
 });
 const page = usePage();
 const isOpen = useApplicationWindow();
@@ -109,6 +111,40 @@ const folderBReady = computed(
 const savedMerits = () =>
     (props.application.form_data?.merits ?? []).map((entry) => ({ ...entry }));
 const merits = useForm({ merits: savedMerits() });
+const appealForm = useForm({ type: "", stage: "", grounds: "", evidence: "" });
+const appealLabels = {
+    reconsideracion: "Reconsideración",
+    apelacion: "Apelación",
+};
+const stageLabels = {
+    aptitude: "Resultados de aptitud",
+    external: "Aspectos externos",
+};
+const appealStatusLabels = { PENDIENTE: "Pendiente", RESUELTA: "Resuelta" };
+function fileAppeal() {
+    appealForm.post(url(path.value + "/impugnaciones"), {
+        preserveScroll: true,
+        onSuccess: () => appealForm.reset(),
+    });
+}
+const canFileReconsideracion = computed(
+    () =>
+        props.appealEligibility?.reconsideracion.aptitude ||
+        props.appealEligibility?.reconsideracion.external ||
+        false,
+);
+const canFileApelacion = computed(
+    () =>
+        props.appealEligibility?.apelacion.aptitude ||
+        props.appealEligibility?.apelacion.external ||
+        false,
+);
+const availableStages = computed(() => {
+    if (!appealForm.type) return [];
+    return Object.entries(props.appealEligibility?.[appealForm.type] ?? {})
+        .filter(([, ok]) => ok)
+        .map(([stage]) => stage);
+});
 const groupedMeritCriteria = computed(() => {
     const groups = new Map();
     for (const [key, criterion] of Object.entries(props.meritCriteria)) {
@@ -587,6 +623,113 @@ const finalStatus = {
                                 "
                             />
                         </details>
+                    </section>
+                    <section
+                        v-if="
+                            appeals?.length ||
+                            canFileReconsideracion ||
+                            canFileApelacion
+                        "
+                        class="form-section"
+                    >
+                        <h3>Recursos impugnatorios</h3>
+                        <p class="muted">
+                            Puedes presentar una reconsideración ante la
+                            comisión o una apelación ante el consejo dentro del
+                            plazo desde la publicación de resultados.
+                        </p>
+                        <div
+                            v-for="appeal in appeals"
+                            :key="appeal.id"
+                            class="schedule-row"
+                        >
+                            <div>
+                                <b
+                                    >{{ appealLabels[appeal.type] }} ·
+                                    {{ stageLabels[appeal.stage] }}</b
+                                >
+                                <small class="block muted">{{
+                                    appeal.grounds
+                                }}</small>
+                                <small v-if="appeal.decision" class="block"
+                                    >Resolución: {{ appeal.decision }}</small
+                                >
+                            </div>
+                            <Badge :value="appeal.status" />
+                        </div>
+                        <form
+                            v-if="canFileReconsideracion || canFileApelacion"
+                            class="appeal-form"
+                            @submit.prevent="fileAppeal"
+                        >
+                            <Errors :errors="appealForm.errors" />
+                            <div class="form-grid">
+                                <label
+                                    >Tipo de recurso
+                                    <select
+                                        v-model="appealForm.type"
+                                        required
+                                        @change="appealForm.stage = ''"
+                                    >
+                                        <option value="" disabled>
+                                            Selecciona el recurso
+                                        </option>
+                                        <option
+                                            v-if="canFileReconsideracion"
+                                            value="reconsideracion"
+                                        >
+                                            Reconsideración (ante la comisión)
+                                        </option>
+                                        <option
+                                            v-if="canFileApelacion"
+                                            value="apelacion"
+                                        >
+                                            Apelación (ante el consejo)
+                                        </option>
+                                    </select>
+                                </label>
+                                <label
+                                    >Etapa que impugnas
+                                    <select v-model="appealForm.stage" required>
+                                        <option value="" disabled>
+                                            Selecciona la etapa
+                                        </option>
+                                        <option
+                                            v-for="stage in availableStages"
+                                            :key="stage"
+                                            :value="stage"
+                                        >
+                                            {{ stageLabels[stage] }}
+                                        </option>
+                                    </select>
+                                </label>
+                            </div>
+                            <label
+                                >Fundamentos de la impugnación
+                                <textarea
+                                    v-model="appealForm.grounds"
+                                    required
+                                    minlength="10"
+                                    maxlength="3000"
+                                    rows="4"
+                                ></textarea>
+                            </label>
+                            <label
+                                >Pruebas nuevas o documentación adicional
+                                <small>Opcional</small>
+                                <textarea
+                                    v-model="appealForm.evidence"
+                                    maxlength="3000"
+                                    rows="2"
+                                ></textarea>
+                            </label>
+                            <button
+                                class="btn btn-primary"
+                                :disabled="appealForm.processing"
+                            >
+                                Presentar recurso
+                            </button>
+                        </form>
                     </section>
                 </section>
 

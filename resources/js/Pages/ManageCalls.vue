@@ -1,5 +1,5 @@
 <script setup>
-import { Link } from "@inertiajs/vue3";
+import { Link, router } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Badge from "../Components/Badge.vue";
 import Icon from "../Components/Icon.vue";
@@ -10,13 +10,41 @@ const actionLabels = {
     PUBLICADA: "Ver inscripción",
     EN_EVALUACION: "Gestionar evaluación",
 };
+function removeCall(id) {
+    if (
+        window.confirm(
+            "¿Eliminar esta convocatoria en borrador? Se borrarán sus plazas y expedientes en borrador.",
+        )
+    ) {
+        router.delete(url("/gestion/convocatorias/" + id), {
+            preserveScroll: true,
+        });
+    }
+}
+function cleanupDemo() {
+    if (
+        window.confirm(
+            "¿Limpiar todas las convocatorias de demostración en borrador? Se eliminarán sus plazas y expedientes en borrador.",
+        )
+    ) {
+        router.post(url("/gestion/limpiar-prueba"), { preserveScroll: true });
+    }
+}
 </script>
 <template>
     <AppLayout
         title="Convocatorias"
         subtitle="Organiza las plazas, el cronograma y las etapas de cada concurso."
         ><template #actions
-            ><Link
+            ><button
+                v-if="$page.props.demo"
+                type="button"
+                class="btn btn-outline"
+                @click="cleanupDemo"
+            >
+                <Icon name="X" :size="17" />Limpiar demostración
+            </button>
+            <Link
                 :href="url('/gestion/convocatorias/nueva')"
                 class="btn btn-primary"
                 ><Icon name="Plus" :size="18" />Nueva convocatoria</Link
@@ -40,12 +68,26 @@ const actionLabels = {
                     }}</span>
                 </div>
                 <div class="row between card-bottom">
-                    <small>Cierre de inscripción: {{ date(c.closes_at) }}</small
-                    ><Link
-                        :href="url('/gestion/convocatorias/' + c.id)"
-                        class="text-link"
-                        >{{ actionLabels[c.status] || "Ver convocatoria" }} <Icon name="ArrowRight" :size="17"
-                    /></Link>
+                    <small
+                        >Cierre de inscripción: {{ date(c.closes_at) }}</small
+                    >
+                    <div class="row">
+                        <button
+                            v-if="c.status === 'BORRADOR'"
+                            type="button"
+                            class="icon-btn"
+                            aria-label="Eliminar convocatoria"
+                            @click="removeCall(c.id)"
+                        >
+                            <Icon name="X" :size="17" />
+                        </button>
+                        <Link
+                            :href="url('/gestion/convocatorias/' + c.id)"
+                            class="text-link"
+                            >{{ actionLabels[c.status] || "Ver convocatoria" }}
+                            <Icon name="ArrowRight" :size="17"
+                        /></Link>
+                    </div>
                 </div>
             </article>
         </div>

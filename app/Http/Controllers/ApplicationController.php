@@ -8,6 +8,7 @@ use App\Models\ApplicationDocument;
 use App\Models\AuditEvent;
 use App\Models\RecruitmentCall;
 use App\Models\Vacancy;
+use App\Services\AppealService;
 use App\Services\ApplicantScreening;
 use App\Services\ApplicationWorkflow;
 use App\Services\VacancyEvaluationWorkflow;
@@ -57,11 +58,11 @@ class ApplicationController extends Controller
         return redirect()->route('applications.show', $application);
     }
 
-    public function show(Request $request, Application $application, ApplicantScreening $screening): Response
+    public function show(Request $request, Application $application, ApplicantScreening $screening, AppealService $appeals): Response
     {
         abort_unless($application->user_id === $request->user()->id, 404);
 
-        $application->load('vacancy', 'recruitmentCall', 'documents');
+        $application->load('vacancy', 'recruitmentCall', 'documents', 'appeals.decider');
 
         $report = $screening->assess($application);
         $publications = $application->vacancy->stage_publications ?? [];
@@ -74,6 +75,17 @@ class ApplicationController extends Controller
             'curriculumIndex' => VacancyEvaluationWorkflow::curriculumIndex($application),
             'meritCriteria' => ! $application->submitted_at && VacancyEvaluationWorkflow::configured($application->vacancy)
                 ? VacancyEvaluationWorkflow::criteria($application->vacancy) : [],
+            'appeals' => $application->appeals,
+            'appealEligibility' => [
+                'reconsideracion' => [
+                    'aptitude' => $appeals->canFileReconsideracion($application, 'aptitude'),
+                    'external' => $appeals->canFileReconsideracion($application, 'external'),
+                ],
+                'apelacion' => [
+                    'aptitude' => $appeals->canFileApelacion($application, 'aptitude'),
+                    'external' => $appeals->canFileApelacion($application, 'external'),
+                ],
+            ],
             'evaluationStatus' => VacancyEvaluationWorkflow::configured($application->vacancy) ? [
                 'calendar' => VacancyEvaluationWorkflow::windows($application->vacancy),
                 'aptitudePublished' => isset($publications['aptitude']),
@@ -258,6 +270,23 @@ class ApplicationController extends Controller
         $workflow->submit($application, $request->user(), declaration: isset($data['consent']) ? Arr::only($data, ['statement']) : null);
 
         return back()->with('success', 'Postulación recibida. Tu cargo de recepción ya está disponible.');
+    }
+
+    public function destroy(Request $request, Application $application): RedirectResponse
+    {
+        abort_unless($application->user_id === $request->user()->id, 404);
+
+        DB::transaction(function () use ($application): void {
+            $locked = Application::lockForUpdate()->findOrFail($application->id);
+            abort_unless($locked->status === 'BORRADOR', 409, 'Solo se pueden eliminar expedientes en borrador.');
+            $paths = $locked->documents()->pluck('path')->all();
+            $locked->documents()->delete();
+            $locked->delete();
+            AuditEvent::record('BORRADOR_ELIMINADO', $locked, ['reference' => $locked->reference]);
+            DB::afterCommit(fn () => Storage::disk('local')->delete($paths));
+        });
+
+        return redirect()->route('applications.index')->with('success', 'Borrador eliminado.');
     }
 
     public function document(Request $request, ApplicationDocument $document, ApplicationWorkflow $workflow): BinaryFileResponse

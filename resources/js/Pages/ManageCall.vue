@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from "vue";
-import { Link, useForm } from "@inertiajs/vue3";
+import { Link, router, useForm } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
 import Badge from "../Components/Badge.vue";
@@ -13,6 +13,8 @@ const props = defineProps({
     configuredInternalVacancyIds: Array,
     publishedStages: Object,
     reviewed: [Object, Array],
+    actas: Object,
+    recusals: Object,
 });
 const resultLabels = {
     NO_APTO: "No apto",
@@ -40,7 +42,7 @@ function closeDemo() {
 }
 const transition = useForm({ status: next[props.call.status]?.status });
 const confirmation = ref(false);
-const commission = useForm({ jurors: [] });
+const commission = useForm({ jurors: [], accesitario: "" });
 const selectedVacancy = ref(null);
 const scheduleVacancy = ref(null);
 const stagePublication = useForm({ phase: "" });
@@ -85,12 +87,45 @@ function move() {
 }
 function editJury(v) {
     selectedVacancy.value = v;
-    commission.jurors = v.jurors.map((j) => j.id);
+    commission.clearErrors();
+    commission.jurors = v.jurors
+        .filter((j) => j.pivot?.role !== "accesitario")
+        .map((j) => j.id);
+    commission.accesitario =
+        v.jurors.find((j) => j.pivot?.role === "accesitario")?.id ?? "";
 }
 function saveJury() {
     commission.put(url(`/gestion/plazas/${selectedVacancy.value.id}/jurados`), {
         onSuccess: () => (selectedVacancy.value = null),
     });
+}
+function removeVacancy(vacancy) {
+    if (
+        window.confirm(
+            `¿Eliminar la plaza "${vacancy.school}"? Se borrarán sus expedientes en borrador.`,
+        )
+    ) {
+        router.delete(url(`/gestion/plazas/${vacancy.id}`), {
+            preserveScroll: true,
+        });
+    }
+}
+function resolveRecusal(recusal) {
+    const approve = window.confirm(
+        "¿Aprobar esta abstención? (Aceptar = aprobar y reemplazar, Cancelar = rechazar)",
+    );
+    const decision = window.prompt(
+        "Motivación de la decisión:",
+        approve
+            ? "Abstención aprobada por conflicto de intereses."
+            : "Abstención rechazada.",
+    );
+    if (decision === null) return;
+    router.post(
+        url(`/gestion/abstenciones/${recusal.id}/resolver`),
+        { approve, decision },
+        { preserveScroll: true },
+    );
 }
 </script>
 <template>
@@ -270,6 +305,13 @@ function saveJury() {
                                     : "Configurar aspectos internos"
                             }}
                         </Link>
+                        <button
+                            type="button"
+                            class="btn btn-outline btn-sm"
+                            @click="removeVacancy(v)"
+                        >
+                            Eliminar plaza
+                        </button>
                     </template>
                 </div>
                 <div class="jury-box">
@@ -285,6 +327,51 @@ function saveJury() {
                     >
                         Asignar comisión
                     </button>
+                </div>
+                <div v-if="actas?.[v.id]?.length" class="jury-box">
+                    <Icon name="ClipboardCheck" :size="18" /><span class="grow">
+                        <span
+                            v-for="acta in actas[v.id]"
+                            :key="acta.id"
+                            class="row gap-12"
+                            ><b>Acta de {{ acta.stage }}</b
+                            ><span class="muted"
+                                >{{ acta.signed }}/{{
+                                    acta.required
+                                }}
+                                firmas</span
+                            ><span
+                                v-if="acta.status === 'FIRMADA'"
+                                class="badge badge-apto"
+                                >Firmada</span
+                            ><span v-else class="badge">Pendiente</span></span
+                        >
+                    </span>
+                </div>
+                <div
+                    v-if="
+                        recusals?.[v.id]?.some((r) => r.status === 'SOLICITADA')
+                    "
+                    class="jury-box"
+                >
+                    <Icon name="CircleAlert" :size="18" /><span class="grow">
+                        <span
+                            v-for="recusal in recusals[v.id].filter(
+                                (r) => r.status === 'SOLICITADA',
+                            )"
+                            :key="recusal.id"
+                            class="row gap-12"
+                            ><span class="muted"
+                                >Abstención de {{ recusal.juror.name }}</span
+                            ><button
+                                type="button"
+                                class="btn btn-outline btn-sm"
+                                @click="resolveRecusal(recusal)"
+                            >
+                                Resolver
+                            </button></span
+                        >
+                    </span>
                 </div>
                 <details v-if="reviewed[v.id]?.length">
                     <summary>
@@ -558,7 +645,23 @@ function saveJury() {
                     /><span
                         >{{ j.name }}<small>{{ j.email }}</small></span
                     ></label
-                ><Errors :errors="commission.errors" />
+                ><label
+                    >Accesitario (reemplazo) <small>Opcional</small>
+                    <select v-model="commission.accesitario">
+                        <option value="">Sin accesitario</option>
+                        <option
+                            v-for="j in jurors.filter(
+                                (candidate) =>
+                                    !commission.jurors.includes(candidate.id),
+                            )"
+                            :key="j.id"
+                            :value="j.id"
+                        >
+                            {{ j.name }}
+                        </option>
+                    </select>
+                </label>
+                <Errors :errors="commission.errors" />
                 <div class="row end">
                     <button
                         type="button"

@@ -21,7 +21,7 @@ class ReviewController extends Controller
 {
     public function show(Request $request, Application $application, ApplicationWorkflow $workflow, ApplicantScreening $screening, NombramientoEvaluation $nombramiento): Response
     {
-        $application->load('vacancy', 'recruitmentCall', 'documents');
+        $application->load('vacancy', 'recruitmentCall', 'documents', 'appeals.decider');
         abort_unless($application->submitted_at && ($request->user()->isManager() || $workflow->canReview($request->user(), $application)), 404);
         $own = $application->evaluations()->where('user_id', $request->user()->id)->first();
 
@@ -53,6 +53,7 @@ class ReviewController extends Controller
             'evaluationTemplate' => VacancyEvaluationWorkflow::template($application),
             'evaluationProgress' => $progress,
             'meritCriteria' => $byVacancy ? VacancyEvaluationWorkflow::criteria($application->vacancy) : [],
+            'appeals' => $application->appeals,
         ]);
     }
 

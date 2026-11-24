@@ -5,11 +5,13 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ConfigureScreeningRequest;
 use App\Http\Requests\StoreCallRequest;
 use App\Http\Requests\UpdateAcademicProfileRequest;
+use App\Models\Acta;
 use App\Models\Application;
 use App\Models\AuditEvent;
 use App\Models\RecruitmentCall;
 use App\Models\User;
 use App\Models\Vacancy;
+use App\Services\ActaService;
 use App\Services\ApplicantScreening;
 use App\Services\NombramientoRubric;
 use App\Services\ProfileRegistryLookup;
@@ -18,6 +20,7 @@ use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
@@ -54,6 +57,14 @@ class ManagementController extends Controller
                 'vacancies' => fn ($query) => $query->when($user->role === 'jurado', fn ($query) => $query->whereHas('jurors', fn ($query) => $query->where('users.id', $user->id))),
                 'applications' => fn ($query) => $query->whereNotNull('submitted_at')->when($user->role === 'jurado', fn ($query) => $query->whereHas('vacancy.jurors', fn ($query) => $query->where('users.id', $user->id))),
             ])->latest('id')->limit(4)->get(),
+            'pendingActas' => $user->role === 'jurado'
+                ? Acta::whereHas('vacancy.jurors', fn ($q) => $q->where('users.id', $user->id))
+                    ->where('status', 'ABIERTA')
+                    ->whereDoesntHave('signatures', fn ($q) => $q->where('user_id', $user->id))
+                    ->with('vacancy:id,school,airhsp')
+                    ->latest('id')
+                    ->get()
+                : [],
         ]);
     }
 
@@ -144,6 +155,10 @@ class ManagementController extends Controller
             'publishedStages' => $recruitmentCall->vacancies->mapWithKeys(fn (Vacancy $vacancy): array => [
                 $vacancy->id => array_keys($vacancy->stage_publications ?? []),
             ]),
+            'actas' => $recruitmentCall->vacancies->load('actas.signatures')->mapWithKeys(function (Vacancy $vacancy): array {
+                return [$vacancy->id => $vacancy->actas->map(fn (Acta $acta): array => app(ActaService::class)->status($acta))->values()->all()];
+            }),
+            'recusals' => $recruitmentCall->vacancies->load('recusals.juror:id,name')->mapWithKeys(fn (Vacancy $vacancy): array => [$vacancy->id => $vacancy->recusals->values()->all()]),
             'reviewed' => $reviewed,
         ]);
     }
@@ -190,7 +205,11 @@ class ManagementController extends Controller
 
     public function assign(Request $request, Vacancy $vacancy): RedirectResponse
     {
-        $data = $request->validate(['jurors' => ['required', 'array', 'min:1', 'max:5'], 'jurors.*' => ['required', 'integer', 'distinct', Rule::exists('users', 'id')->where('role', 'jurado')]]);
+        $data = $request->validate([
+            'jurors' => ['required', 'array', 'min:1', 'max:5'],
+            'jurors.*' => ['required', 'integer', 'distinct', Rule::exists('users', 'id')->where('role', 'jurado')],
+            'accesitario' => ['nullable', 'integer', Rule::exists('users', 'id')->where('role', 'jurado')],
+        ]);
         DB::transaction(function () use ($vacancy, $data) {
             $call = RecruitmentCall::lockForUpdate()->findOrFail($vacancy->recruitment_call_id);
             abort_unless(in_array($call->status, ['BORRADOR', 'PUBLICADA'], true), 409);
@@ -198,8 +217,15 @@ class ManagementController extends Controller
             if (($call->evaluation_template || VacancyEvaluationWorkflow::configured($vacancy)) && $call->status === 'PUBLICADA' && count($data['jurors']) !== 3) {
                 throw ValidationException::withMessages(['jurors' => 'Esta convocatoria requiere tres jurados titulares por plaza.']);
             }
-            $vacancy->jurors()->sync($data['jurors']);
-            AuditEvent::record('JURADO_ASIGNADO', $vacancy, ['jurors' => $data['jurors']]);
+            if (isset($data['accesitario']) && in_array($data['accesitario'], $data['jurors'], true)) {
+                throw ValidationException::withMessages(['accesitario' => 'El accesitario no puede ser también jurado titular de la misma plaza.']);
+            }
+            $assignments = collect($data['jurors'])->mapWithKeys(fn (int $id): array => [$id => ['role' => 'titular']])->all();
+            if (! empty($data['accesitario'])) {
+                $assignments[$data['accesitario']] = ['role' => 'accesitario'];
+            }
+            $vacancy->jurors()->sync($assignments);
+            AuditEvent::record('JURADO_ASIGNADO', $vacancy, ['jurors' => $data['jurors'], 'accesitario' => $data['accesitario'] ?? null]);
         });
 
         return back()->with('success', 'Comisión asignada.');
@@ -216,6 +242,45 @@ class ManagementController extends Controller
         });
 
         return back()->with('success', 'Inscripción de prueba cerrada. Ya puedes revisar los expedientes enviados.');
+    }
+
+    public function destroy(RecruitmentCall $recruitmentCall): RedirectResponse
+    {
+        $call = RecruitmentCall::lockForUpdate()->findOrFail($recruitmentCall->id);
+        abort_unless($call->status === 'BORRADOR', 409, 'Solo se pueden eliminar convocatorias en borrador.');
+        abort_if($call->applications()->whereNotNull('submitted_at')->exists(), 409, 'La convocatoria tiene expedientes enviados y no se puede eliminar.');
+        DB::transaction(fn () => $this->purgeCall($call));
+
+        return redirect()->route('management.calls')->with('success', 'Convocatoria eliminada.');
+    }
+
+    public function cleanupDemo(): RedirectResponse
+    {
+        abort_unless(app()->environment('local') && config('recruitment.demo'), 404);
+        $calls = RecruitmentCall::where('is_demo', true)->where('status', 'BORRADOR')->get();
+        DB::transaction(function () use ($calls): void {
+            foreach ($calls as $call) {
+                $this->purgeCall(RecruitmentCall::lockForUpdate()->findOrFail($call->id));
+            }
+        });
+
+        return back()->with('success', $calls->count() ? 'Se eliminaron '.$calls->count().' convocatorias de demostración en borrador.' : 'No hay borradores de demostración que limpiar.');
+    }
+
+    private function purgeCall(RecruitmentCall $call): void
+    {
+        $documentPaths = $call->applications()->with('documents')->get()
+            ->flatMap(fn (Application $application) => $application->documents->pluck('path'))->all();
+        $call->applications()->delete();
+        $vacancies = $call->vacancies()->get();
+        $attachedPaths = $vacancies->flatMap(fn (Vacancy $vacancy) => array_column($vacancy->attached_documents ?? [], 'path'))->all();
+        if ($vacancyIds = $vacancies->modelKeys()) {
+            DB::table('jury_assignments')->whereIn('vacancy_id', $vacancyIds)->delete();
+            Vacancy::whereIn('id', $vacancyIds)->delete();
+        }
+        AuditEvent::record('CONVOCATORIA_ELIMINADA', $call, ['code' => $call->code]);
+        $call->delete();
+        DB::afterCommit(fn () => Storage::disk('local')->delete([...$documentPaths, ...$attachedPaths]));
     }
 
     public function transition(Request $request, RecruitmentCall $recruitmentCall): RedirectResponse
@@ -274,6 +339,20 @@ class ManagementController extends Controller
                     throw ValidationException::withMessages(['status' => 'Hay expedientes pendientes de revisión o de calificaciones del jurado.']);
                 }
                 $call->results_published_at = now();
+                foreach ($call->vacancies()->get() as $vacancy) {
+                    $finalRows = $vacancy->applications()->whereNotNull('submitted_at')->get()
+                        ->map(fn (Application $application): array => [
+                            'reference' => $application->reference,
+                            'result' => $application->evaluation_outcome['stage'] ?? $application->status,
+                            'score' => $application->evaluation_outcome['final'] ?? null,
+                        ])->values()->all();
+                    app(ActaService::class)->generate($vacancy, 'final', [
+                        'vacancy' => $vacancy->school,
+                        'stage' => 'final',
+                        'published_at' => now()->toIso8601String(),
+                        'rows' => $finalRows,
+                    ]);
+                }
             }
             $before = $call->status;
             $call->status = $data['status'];

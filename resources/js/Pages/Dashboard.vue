@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { Link, usePage } from "@inertiajs/vue3";
+import { Link, router, usePage } from "@inertiajs/vue3";
 import AppLayout from "../Layouts/AppLayout.vue";
 import Icon from "../Components/Icon.vue";
 import Badge from "../Components/Badge.vue";
@@ -10,16 +10,22 @@ const props = defineProps({
     stats: Object,
     applications: Array,
     calls: Array,
+    pendingActas: Array,
 });
 const user = usePage().props.auth.user;
 const applicant = user.role === "postulante";
 const juror = user.role === "jurado";
 const isOpen = useApplicationWindow();
-const title = applicant ? "Inicio del postulante" : juror ? "Panel del jurado" : "Panel de gestión";
+const title = applicant
+    ? "Inicio del postulante"
+    : juror
+      ? "Panel del jurado"
+      : "Panel de gestión";
 const nextAction = computed(() => {
     if (applicant) {
         const draft = props.applications?.find(
-            (item) => item.status === "BORRADOR" && isOpen(item.recruitment_call),
+            (item) =>
+                item.status === "BORRADOR" && isOpen(item.recruitment_call),
         );
         return draft
             ? {
@@ -61,7 +67,9 @@ const nextAction = computed(() => {
             path: `/gestion/convocatorias/${draft.id}`,
         };
     }
-    const inReview = props.calls?.find((call) => call.status === "EN_EVALUACION");
+    const inReview = props.calls?.find(
+        (call) => call.status === "EN_EVALUACION",
+    );
     if (inReview) {
         return {
             text: `${inReview.title} está en evaluación. Consulta sus expedientes y el avance de la comisión.`,
@@ -76,10 +84,22 @@ const nextAction = computed(() => {
     };
 });
 const steps = applicant
-    ? ["Consulta la plaza y su cronograma.", "Completa el formulario y adjunta los sustentos.", "Confirma el envío y descarga el cargo."]
+    ? [
+          "Consulta la plaza y su cronograma.",
+          "Completa el formulario y adjunta los sustentos.",
+          "Confirma el envío y descarga el cargo.",
+      ]
     : juror
-      ? ["Verifica los requisitos y registra la aptitud.", "Revisa los méritos y confirma la hoja externa si el concurso usa etapas.", "Registra tu calificación cuando se habilite."]
-      : ["Configura las plazas y el cronograma.", "Asigna jurados y publica la convocatoria.", "Da seguimiento a la revisión y publica los resultados."];
+      ? [
+            "Verifica los requisitos y registra la aptitud.",
+            "Revisa los méritos y confirma la hoja externa si el concurso usa etapas.",
+            "Registra tu calificación cuando se habilite.",
+        ]
+      : [
+            "Configura las plazas y el cronograma.",
+            "Asigna jurados y publica la convocatoria.",
+            "Da seguimiento a la revisión y publica los resultados.",
+        ];
 </script>
 <template>
     <AppLayout :title="title">
@@ -100,12 +120,16 @@ const steps = applicant
             <article
                 v-for="(metric, i) in [
                     {
-                        label: juror ? 'Convocatorias asignadas' : 'Convocatorias registradas',
+                        label: juror
+                            ? 'Convocatorias asignadas'
+                            : 'Convocatorias registradas',
                         value: stats.calls,
                         icon: 'BriefcaseBusiness',
                     },
                     {
-                        label: juror ? 'Plazas asignadas' : 'Plazas registradas',
+                        label: juror
+                            ? 'Plazas asignadas'
+                            : 'Plazas registradas',
                         value: stats.vacancies,
                         icon: 'GraduationCap',
                     },
@@ -218,17 +242,57 @@ const steps = applicant
                     </li>
                 </ol>
                 <Link v-if="applicant" :href="url('/perfil')" class="text-link">
-                    Abrir mi perfil y méritos <Icon name="ArrowRight" :size="16" />
+                    Abrir mi perfil y méritos
+                    <Icon name="ArrowRight" :size="16" />
                 </Link>
                 <Link v-else :href="url('/ayuda')" class="text-link">
                     Consultar guía <Icon name="ArrowUpRight" :size="16" />
                 </Link>
             </aside>
         </div>
+        <section v-if="pendingActas?.length" class="panel">
+            <div class="panel-heading">
+                <Icon name="ClipboardCheck" />
+                <h2>Actas por firmar</h2>
+            </div>
+            <p class="muted">
+                Firma las actas de las etapas en las que participaste como
+                jurado. La firma registra tu conformidad con el contenido.
+            </p>
+            <div
+                v-for="acta in pendingActas"
+                :key="acta.id"
+                class="schedule-row"
+            >
+                <span
+                    >{{ acta.vacancy.school }} · AIRHSP
+                    {{ acta.vacancy.airhsp }}</span
+                ><b>{{ acta.stage }}</b>
+                <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    @click="
+                        router.post(
+                            url('/actas/' + acta.id + '/firmar'),
+                            {},
+                            { preserveScroll: true },
+                        )
+                    "
+                >
+                    Firmar acta
+                </button>
+            </div>
+        </section>
         <section v-if="calls?.length" class="panel">
             <div class="panel-heading">
                 <Icon name="CalendarDays" />
-                <h2>{{ juror ? "Convocatorias asignadas" : "Convocatorias recientes" }}</h2>
+                <h2>
+                    {{
+                        juror
+                            ? "Convocatorias asignadas"
+                            : "Convocatorias recientes"
+                    }}
+                </h2>
             </div>
             <div class="table-scroll">
                 <table>
@@ -253,7 +317,13 @@ const steps = applicant
                                     >{{ c.title }}</Link
                                 ><Link
                                     v-else-if="c.status !== 'BORRADOR'"
-                                    :href="url('/expedientes?call=' + c.id + '&sort=recent')"
+                                    :href="
+                                        url(
+                                            '/expedientes?call=' +
+                                                c.id +
+                                                '&sort=recent',
+                                        )
+                                    "
                                     class="table-title"
                                     >{{ c.title }}</Link
                                 ><b v-else>{{ c.title }}</b

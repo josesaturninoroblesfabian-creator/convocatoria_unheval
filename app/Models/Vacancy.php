@@ -48,11 +48,21 @@ class Vacancy extends Model
 
     public function jurors(): BelongsToMany
     {
-        return $this->belongsToMany(User::class, 'jury_assignments');
+        return $this->belongsToMany(User::class, 'jury_assignments')->withPivot('role');
     }
 
     public function applications(): HasMany
     {
         return $this->hasMany(Application::class);
+    }
+
+    public function actas(): HasMany
+    {
+        return $this->hasMany(Acta::class);
+    }
+
+    public function recusals(): HasMany
+    {
+        return $this->hasMany(JuryRecusal::class);
     }
 }

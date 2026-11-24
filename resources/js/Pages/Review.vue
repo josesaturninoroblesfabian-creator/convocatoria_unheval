@@ -23,6 +23,7 @@ const props = defineProps({
     evaluationProgress: Object,
     phaseOpen: Boolean,
     meritCriteria: Object,
+    appeals: Array,
 });
 const usesCredentials = computed(
     () => !!props.screening?.rules?.academic_credentials,
@@ -167,6 +168,29 @@ function grade() {
         onSuccess: () => (confirming.value = false),
     });
 }
+const appealLabels = {
+    reconsideracion: "Reconsideración",
+    apelacion: "Apelación",
+};
+const stageLabels = {
+    aptitude: "Resultados de aptitud",
+    external: "Aspectos externos",
+};
+const resolveAppeal = useForm({ decision: "" });
+const resolvingAppeal = ref(null);
+function openResolve(appeal) {
+    resolvingAppeal.value = appeal;
+    resolveAppeal.decision = "";
+}
+function submitResolve() {
+    resolveAppeal.post(
+        url(`/impugnaciones/${resolvingAppeal.value.id}/resolver`),
+        {
+            preserveScroll: true,
+            onSuccess: () => (resolvingAppeal.value = null),
+        },
+    );
+}
 </script>
 <template>
     <AppLayout
@@ -290,6 +314,40 @@ function grade() {
                 }}</span
                 ><b>{{ answer }}</b>
             </div>
+        </section>
+        <section v-if="appeals?.length" class="panel">
+            <div class="panel-heading">
+                <Icon name="CircleAlert" />
+                <h2>Recursos impugnatorios</h2>
+            </div>
+            <div
+                v-for="appeal in appeals"
+                :key="appeal.id"
+                class="schedule-row"
+            >
+                <div>
+                    <b
+                        >{{ appealLabels[appeal.type] }} ·
+                        {{ stageLabels[appeal.stage] }}</b
+                    >
+                    <small class="block muted">{{ appeal.grounds }}</small>
+                    <small v-if="appeal.decision" class="block"
+                        >Resolución: {{ appeal.decision }}</small
+                    >
+                </div>
+                <Badge :value="appeal.status" />
+                <button
+                    v-if="appeal.status === 'PENDIENTE' && canReview"
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    @click="openResolve(appeal)"
+                >
+                    Resolver
+                </button>
+            </div>
+            <p v-if="!appeals.length" class="muted">
+                El postulante no ha presentado recursos impugnatorios.
+            </p>
         </section>
         <div class="review-split">
             <section class="pdf-panel">
@@ -615,6 +673,46 @@ function grade() {
                     </button>
                 </div>
             </section>
+        </div>
+        <div
+            v-if="resolvingAppeal"
+            class="modal-backdrop"
+            @click.self="resolvingAppeal = null"
+        >
+            <form class="modal" @submit.prevent="submitResolve">
+                <h2>Resolver recurso impugnatorio</h2>
+                <p>
+                    {{ appealLabels[resolvingAppeal.type] }}
+                    · {{ stageLabels[resolvingAppeal.stage] }}
+                </p>
+                <p class="muted">{{ resolvingAppeal.grounds }}</p>
+                <Errors :errors="resolveAppeal.errors" />
+                <label
+                    >Resolución motivada
+                    <textarea
+                        v-model="resolveAppeal.decision"
+                        required
+                        minlength="5"
+                        maxlength="3000"
+                        rows="4"
+                    ></textarea>
+                </label>
+                <div class="row end">
+                    <button
+                        type="button"
+                        class="btn btn-outline"
+                        @click="resolvingAppeal = null"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        :disabled="resolveAppeal.processing"
+                    >
+                        Registrar resolución
+                    </button>
+                </div>
+            </form>
         </div></AppLayout
     >
 </template>

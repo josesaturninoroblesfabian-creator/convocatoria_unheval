@@ -8,6 +8,7 @@ use App\Models\Application;
 use App\Models\AuditEvent;
 use App\Models\RecruitmentCall;
 use App\Models\Vacancy;
+use App\Services\ActaService;
 use App\Services\ApplicantScreening;
 use App\Services\VacancyEvaluationWorkflow;
 use Illuminate\Http\RedirectResponse;
@@ -200,6 +201,12 @@ class VacancyManagementController extends Controller
                 ])->values()->all();
             $publications[$phase] = ['published_at' => now()->toIso8601String(), 'rows' => $rows];
             $vacancy->update(['stage_publications' => $publications]);
+            app(ActaService::class)->generate($vacancy, $phase, [
+                'vacancy' => $vacancy->school,
+                'stage' => $phase,
+                'published_at' => $publications[$phase]['published_at'],
+                'rows' => $rows,
+            ]);
             AuditEvent::record('RESULTADOS_ETAPA_PUBLICADOS', $vacancy, ['phase' => $phase, 'count' => count($rows)]);
         });
 
@@ -260,6 +267,24 @@ class VacancyManagementController extends Controller
         });
 
         return back()->with('success', 'PDF retirado de la ficha.');
+    }
+
+    public function destroy(Vacancy $vacancy): RedirectResponse
+    {
+        DB::transaction(function () use ($vacancy): void {
+            $this->lockDraft($vacancy->recruitment_call_id);
+            $locked = Vacancy::lockForUpdate()->findOrFail($vacancy->id);
+            abort_if($locked->applications()->whereNotNull('submitted_at')->exists(), 409, 'La plaza tiene expedientes enviados y no se puede eliminar.');
+            $documentPaths = $locked->applications()->with('documents')->get()->flatMap(fn (Application $application) => $application->documents->pluck('path'))->all();
+            $locked->applications()->delete();
+            $locked->jurors()->detach();
+            $attachedPaths = array_column($locked->attached_documents ?? [], 'path');
+            $locked->delete();
+            AuditEvent::record('PLAZA_ELIMINADA', $locked, ['airhsp' => $locked->airhsp]);
+            DB::afterCommit(fn () => Storage::disk('local')->delete([...$documentPaths, ...$attachedPaths]));
+        });
+
+        return redirect()->route('management.calls.show', $vacancy->recruitment_call_id)->with('success', 'Plaza eliminada.');
     }
 
     private function createVacancy(RecruitmentCall $call, array $data): Vacancy
